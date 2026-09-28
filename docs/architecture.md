@@ -49,14 +49,14 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 
 1. **Device** — the amp; holds live sound, saved slots, effect state. Source of truth.
 2. **Transport** — BLE, fragmentation/reassembly, write-without-response on `0xFFC1`, notify on `0xFFC2` (SOURCED).
-3. **State** — structured model of live preset, saved presets, effects, parameters (`src/spark/types.ts`).
+3. **State** — structured model of live preset, saved presets, effects, parameters. Today: the `Preset` type in `protocol.ts` and `SparkAmpState` in `transport.ts`.
 4. **UI** — not built yet.
 
 Current code:
-- `src/spark/protocol.ts` — frame codec (`F0 01 … F7`). See lessons-learned: command values and packing are not yet correct/verified.
-- `src/spark/types.ts` — state model types
-- `src/spark/client.ts` — `SparkBtClient` over an abstract `SparkTransport`
-- `src/index.ts` — demo entry point
+- `src/spark/protocol.ts` — pure codec: framing (`F0 01 … F7`), 7/8-bit packing, value types, commands, preset parse/serialize/validate. Ported from SparklingTones.
+- `src/spark/transport.ts` — `SparkTransport`: Web Bluetooth connect, serialized send queue, reassembly, reply waiting, preset read, and verified preset writes (`loadPreset`, `storePreset`, `setBpm`). Ported from SparklingTones. Uses `navigator.bluetooth` directly (no transport abstraction — see `planning/ideas.md`); tests inject a fake with the same shape. Refuses write commands (`0x01`) unless the device name is `Spark LIVE BLE`, until the Spark GO profile exists.
+- `src/spark/verify.ts` — `presetDifferences`, the read-back comparison behind every preset write.
+- `src/index.ts` — re-exports the above.
 
 ## Architectural invariants
 

@@ -18,6 +18,8 @@ npm run build    # tsc → dist/
 
 Capture page: serve `tools/capture/` on localhost (e.g. `python -m http.server 8765`) and open it in Chrome or Edge.
 
+Read test page (read-only, uses `SparkTransport`): run `npm run build`, then serve the **repo root** (`python -m http.server 8765`) and open `http://localhost:8765/tools/live-test/` in Chrome or Edge.
+
 ## Credits
 
 Protocol code and test captures from SparklingTones (MIT). See `THIRD_PARTY_NOTICES.md`.

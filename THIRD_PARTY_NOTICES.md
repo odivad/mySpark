@@ -9,6 +9,7 @@ https://github.com/mazzrelaz/SparklingTones — ported from commit `f25379d` (20
 Ported to TypeScript (translated comments, renamed identifiers, same behavior):
 
 - `src/spark-protocol.js` → `src/spark/protocol.ts`
+- `src/spark-transport.js` → `src/spark/transport.ts` (with changes: read-back verification of preset and bpm writes, Spark-LIVE-only write guard, BLE write errors propagated)
 - `test/protocol-test.html` and `test/fixtures/preset0.js` → `test/protocol.test.ts` and `test/fixtures/sparklingtones.ts` (real Spark 2 captures)
 
 ```

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spark Read Test</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --line:#ddd; --accent:#0a66c2; --hl:#e8f1fb; --off:#aaa; --warn:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141414; --fg:#eee; --muted:#999; --line:#333; --accent:#6aa7ff; --hl:#1d2a3a; --off:#666; --warn:#ff8a80; }
+  }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; max-width:900px; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  h2 { font-size:1rem; margin:20px 0 6px; }
+  p.note { color:var(--muted); margin:0 0 12px; font-size:0.9rem; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:0.4; cursor:default; }
+  #status { font-weight:600; margin-bottom:4px; }
+  #info { color:var(--muted); font-size:0.9rem; white-space:pre-wrap; }
+  table { border-collapse:collapse; width:100%; font-size:0.9rem; }
+  td, th { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr.current { background:var(--hl); font-weight:600; }
+  .off { color:var(--off); }
+  .params { font:12px/1.5 ui-monospace, Consolas, monospace; }
+  .flash { outline:2px solid var(--accent); }
+  .warn { color:var(--warn); }
+  #log { font:12px/1.5 ui-monospace, Consolas, monospace; border:1px solid var(--line); border-radius:6px; padding:8px; height:30vh; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>Spark Read Test (read-only)</h1>
+<p class="note">Tests mySpark's <code>SparkTransport</code> on the amp. This page only <strong>reads</strong>: it never sends a write command. Close the Spark app, SparklingTones and the capture page first, since only one app can connect at a time.</p>
+
+<div class="bar">
+  <button id="connect" class="primary">Connect</button>
+  <button id="read" disabled>Read all slots + live sound</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <button id="save" disabled>Save session (JSON)</button>
+</div>
+<div id="status">Not connected</div>
+<div id="info"></div>
+
+<h2>Saved slots</h2>
+<table><thead><tr><th>Slot</th><th>Name</th><th>Chain</th></tr></thead><tbody id="slots"><tr><td colspan="3" class="off">Not read yet</td></tr></tbody></table>
+
+<h2>Sound playing now (live state)</h2>
+<p class="note">Values shown 0–10, like the amp app (the amp stores 0–1). Turn a knob on the amp and it updates here.</p>
+<table><thead><tr><th>Block</th><th>Model</th><th>Params</th></tr></thead><tbody id="live"><tr><td colspan="3" class="off">Not read yet</td></tr></tbody></table>
+
+<h2>Log</h2>
+<div id="log"></div>
+
+<script type="module">
+import { SparkTransport } from '../../dist/spark/transport.js';
+import { CHAIN, CMD_NOTIFY, Reader, slotLabel } from '../../dist/spark/protocol.js';
+
+const SLOT_COUNT = 8; // VERIFIED-HW: Spark LIVE
+// Amp-block knob names by param index. SOURCED: SparklingTones src/spark-effetti.js;
+// VERIFIED-HW on the Spark LIVE for 0–3 (capture 3, 2026-09-28). Other blocks show numbers.
+const AMP_KNOBS = ['Gain', 'Treble', 'Middle', 'Bass', 'Master'];
+const AMP_BLOCK = 3;
+
+const $ = (id) => document.getElementById(id);
+const hex = (a) => Array.from(a, (b) => b.toString(16).padStart(2, '0')).join(' ');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+const session = { tool: 'mySpark tools/live-test', startedAt: null, device: null, identify: null, slots: [], live: null, rx: [] };
+let live = null;
+
+function log(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toISOString().slice(11, 23)}  ${text}`;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+const t = new SparkTransport({
+  onStatus: (status, detail) => {
+    $('status').textContent = status === 'connected' ? `Connected: ${detail}` : detail;
+    const on = status === 'connected';
+    $('connect').disabled = on || status === 'connecting';
+    $('read').disabled = !on;
+    $('disconnect').disabled = !on;
+  },
+  onLog: (line) => log(line),
+  onMessage: (m) => {
+    session.rx.push({ t: new Date().toISOString(), cmd: m.cmd, sub: m.sub, seq: m.seq, checksumOk: m.checksumOk, hex: hex(m.raw) });
+    if (!m.checksumOk) log(`checksum mismatch on 0x${hex([m.cmd, m.sub])}`, 'warn');
+    if (m.cmd !== CMD_NOTIFY) return;
+    if (m.sub === 0x38) {
+      const [bank, slot] = m.data;
+      if (bank !== 0x00) {
+        // Bank 0x03 = the back CH2 PRESET knob (capture 4). Not a CH1 slot.
+        log(`amp switched preset on bank 0x${hex([bank])} (not CH1), number ${slot}`);
+        return;
+      }
+      log(`amp switched to slot ${slot} (${slot < SLOT_COUNT ? slotLabel(slot).label : 'not a saved slot'})`);
+      renderSlots();
+      readLive(); // the live sound changed; re-read it from the amp
+    } else if (m.sub === 0x37) {
+      onKnob(m.data);
+    } else if (m.sub !== 0x01) {
+      log(`RX 0x${hex([m.cmd, m.sub])} seq=0x${hex([m.seq])} data ${hex(m.data)}`);
+    }
+  },
+});
+
+function onKnob(data) {
+  try {
+    const r = new Reader(data);
+    const model = r.prefixedString();
+    const param = r.int();
+    const value = r.float();
+    const block = live ? live.effects.findIndex((e) => e.name === model) : -1;
+    const label = block === AMP_BLOCK ? AMP_KNOBS[param] ?? `P${param}` : `P${param}`;
+    log(`knob: ${model} ${label} = ${(value * 10).toFixed(1)}`);
+    if (block >= 0) {
+      const p = live.effects[block].params.find((q) => q.index === param);
+      if (p) p.value = value; // cached projection; the amp stays the source of truth
+      renderLive(`${block}-${param}`);
+    }
+  } catch (e) {
+    log(`0x0337 not decoded: ${e.message}`, 'warn');
+  }
+}
+
+function paramText(blockIndex, params, flashKey) {
+  return params.map((p) => {
+    const name = blockIndex === AMP_BLOCK ? AMP_KNOBS[p.index] ?? `P${p.index}` : `P${p.index}`;
+    const cls = flashKey === `${blockIndex}-${p.index}` ? ' class="flash"' : '';
+    return `<span${cls}>${esc(name)} ${(p.value * 10).toFixed(1)}</span>`;
+  }).join(' · ');
+}
+
+function renderSlots() {
+  if (!session.slots.length) return;
+  $('slots').innerHTML = session.slots.map(({ slot, preset }) => {
+    const current = t.state.currentPreset === slot ? ' class="current"' : '';
+    if (!preset) return `<tr${current}><td>${slotLabel(slot).label}</td><td colspan="2" class="warn">no reply / not readable</td></tr>`;
+    const chain = preset.effects.map((e) => `<span class="${e.enabled ? '' : 'off'}">${esc(e.name)}</span>`).join(' → ');
+    return `<tr${current}><td>${slotLabel(slot).label}</td><td>${esc(preset.name)}</td><td>${chain}</td></tr>`;
+  }).join('');
+}
+
+function renderLive(flashKey) {
+  if (!live) {
+    $('live').innerHTML = '<tr><td colspan="3" class="warn">Live state not readable</td></tr>';
+    return;
+  }
+  $('live').innerHTML = live.effects.map((e, i) =>
+    `<tr><td>${esc(CHAIN[i] ?? `Block ${i + 1}`)}</td><td class="${e.enabled ? '' : 'off'}">${esc(e.name)}${e.enabled ? '' : ' (off)'}</td>` +
+    `<td class="params">${paramText(i, e.params, flashKey)}</td></tr>`).join('') +
+    `<tr><td>Preset</td><td colspan="2">${esc(live.name)} · ${live.bpm.toFixed(0)} bpm</td></tr>`;
+}
+
+let liveReading = false;
+async function readLive() {
+  if (liveReading) return;
+  liveReading = true;
+  try {
+    live = await t.readLiveState();
+    session.live = live;
+    renderLive();
+  } finally {
+    liveReading = false;
+  }
+}
+
+$('connect').onclick = async () => {
+  try {
+    const name = await t.connect();
+    session.startedAt = new Date().toISOString();
+    session.device = name;
+    session.identify = { ...(await t.identify()) };
+    const s = t.state;
+    $('info').textContent = `Name: ${s.name ?? '(no reply)'}\nSerial: ${s.serial ?? '(no reply)'}\n` +
+      `Current preset: ${s.currentPreset ?? '(no reply)'}` +
+      (s.currentPreset !== null && s.currentPreset < SLOT_COUNT ? ` (${slotLabel(s.currentPreset).label})` : '');
+    $('save').disabled = false;
+  } catch (e) {
+    $('status').textContent = `Could not connect: ${e.name}: ${e.message}`;
+    log(`connect failed — ${e.name}: ${e.message}`, 'warn');
+  }
+};
+
+$('read').onclick = async () => {
+  $('read').disabled = true;
+  try {
+    session.slots = await t.readLibrary(SLOT_COUNT, (i) => { $('status').textContent = `Reading slot ${slotLabel(i).label}…`; });
+    renderSlots();
+    await readLive();
+    const ok = session.slots.filter((s) => s.preset).length;
+    $('status').textContent = `Read ${ok} of ${SLOT_COUNT} slots${live ? ' + live sound' : ''}.`;
+  } finally {
+    $('read').disabled = !t.connected;
+  }
+};
+
+$('disconnect').onclick = () => t.disconnect();
+
+$('save').onclick = () => {
+  const out = { ...session, lastFailedPayload: t.lastFailedPayload };
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `live-test-${(session.startedAt ?? 'session').replace(/[:.]/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>

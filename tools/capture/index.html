@@ -87,9 +87,11 @@ $('connect').onclick = async () => {
     return;
   }
   try {
+    // The name-prefix filter is a fallback in case Windows doesn't report the 0xFFC0
+    // advertisement (only seen from Android so far). UNVERIFIED that Spark GO names start with "Spark".
     device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_MAIN] }],
-      optionalServices: [SERVICE_ALT],
+      filters: [{ services: [SERVICE_MAIN] }, { namePrefix: 'Spark' }],
+      optionalServices: [SERVICE_MAIN, SERVICE_ALT],
     });
     device.addEventListener('gattserverdisconnected', () => {
       $('status').textContent = 'Disconnected';
@@ -99,7 +101,9 @@ $('connect').onclick = async () => {
     $('status').textContent = `Connecting to ${device.name || 'unnamed device'}…`;
     const server = await device.gatt.connect();
 
-    capture.startedAt = new Date().toISOString();
+    // Events from earlier connections stay until Clear; mark where each connection starts.
+    if (!capture.startedAt || capture.events.length === 0) capture.startedAt = new Date().toISOString();
+    capture.events.push({ t: new Date().toISOString(), marker: `connected to ${device.name || 'unnamed device'}` });
     capture.device = { name: device.name || null, id: device.id };
     const services = await server.getPrimaryServices();
     capture.services = [];
@@ -122,7 +126,8 @@ $('connect').onclick = async () => {
     $('status').textContent = `Connected: ${device.name || 'unnamed device'}. Now change things on the amp.`;
     setConnected(true);
   } catch (e) {
-    $('status').textContent = `Could not connect: ${e.message}`;
+    $('status').textContent = `Could not connect: ${e.name}: ${e.message}`;
+    log(`Connect failed — ${e.name}: ${e.message}`, 'sys');
   }
 };
 

@@ -90,6 +90,90 @@ Lesson for mySpark: our slot-write must read the slot back (`0x0201 [0x00, slot]
 ### Protocol details are unverified overall
 Nothing in `docs/` or `src/` has yet been confirmed on the owner's amp. Treat all protocol content as `SOURCED` at best until hardware captures exist.
 
+## 2026-09-28 — First mySpark capture from the Spark LIVE (Windows PC, Chrome)
+
+Capture: `captures/2026-09-28-live-first-capture.json` (mySpark `tools/capture`, read-only, ~20 s, no markers).
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark capture page)`:
+- **Chrome on the Windows PC connects to the LIVE** over Web Bluetooth. The first attempt did not pair; after power-cycling the amp / freeing it from the phone / widening the scan filter it connected. # TO CONFIRM (owner): which of those fixed it.
+- **GATT layout as Web Bluetooth sees it:** service `0xffc0` only — `0xffc1` `writeWithoutResponse`, `0xffc2` `read` + `notify`. `0xffc8` was requested as an optional service and **is not present**, so soundshed's "Spark 2 secondary service `ffc8`" does not apply to the LIVE.
+- **Amp → app messages use seq `0x40` upward**, incrementing per message (`0x40`, `0x41`, `0x42`) — matches SparklingTones' "above `0x3f` is the amp's range".
+- **Our codec decodes the LIVE's own frames with valid checksums** (`parseMessage`, `unpack7bit8bit`, `xorChecksum`) — first direct hardware check of the receive path, not via SparklingTones.
+- **The amp sends `0x0371` unprompted**, three times in 20 s (at +4 s, +7 s, +19 s). Unpacked data: `09 01 01 00 cd 41 86 00 18` (last byte `0x17` once). Meaning **UNVERIFIED — no source documents `0x0371`.** SparklingTones only notes the official app *queries* `0x0271` twice at startup (`docs/looper.md`). Only the last byte changed; do not guess what it is until a longer capture with markers shows what drives it.
+- No other notifications arrived in that window (answered by the second capture below: panel changes *are* reported).
+
+### Second capture: the LIVE reports panel changes unprompted (2026-09-28)
+Capture: `captures/2026-09-28-live-capture-2.json`. The page was not reloaded, so the file also holds the first session (20:09–20:12); the new session starts 22:58. No markers.
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark capture page)` — with no app request sent:
+- **Preset switch on the amp → `0x0338`**, data `[0x00, slot]`: seen `02`, `03`, `04`, `03`. Same message and layout SparklingTones handles; `SparkTransport.trackState` already reads it. # TO CONFIRM (owner): which buttons were pressed, to tie slot numbers to A1–B4 on the LIVE.
+- **Knob turned on the amp → `0x0337`**, data: prefixed-string model name, param index, float `0xca` value, trailing `0x00`. Seen for amp model `94MatchDCV2`, params 0, 3, 2, 1, sent roughly every 60–250 ms while turning. Same layout as SparklingTones' Spark 2 capture `KNOB_REVERB` and soundshed's Spark 40 `0x0337`. Knob-to-index mapping: see the third capture.
+- **`0x031a`** once: data `91 00 03 c3`. Meaning **UNVERIFIED**, no source. (Third capture: it precedes the first knob message, see below.)
+- **`0x0371` keeps coming every 3–15 s** for the whole connection. Data `09 01 01 00 cd 41 86 00 <17|18>`; 2 h 48 min later the middle field read `cd 41 8c`. So there are two changing fields: a uint16 (`0x4186` → `0x418c`) and a last byte flipping between 23 and 24. **Hypothesis only, UNVERIFIED:** status telemetry, e.g. battery voltage in mV (16774 ≈ a full 4-cell pack) and temperature in °C. Test before believing it: capture on battery vs. mains power, and after the amp warms up.
+
+**LIVE panel controls** (owner photos, 2026-09-28), left to right:
+- Power button with a green LED, then two status LEDs marked with **Bluetooth** and **Wi-Fi** icons.
+- CH1 INPUT jack.
+- **PRESET: a knob with "HOLD TO SAVE" above and "PRESS TO SWITCH" below**, beside four LEDs numbered 1–4. So presets are switched by pressing it, saved by holding it.
+- Knobs GAIN, BASS, MID, TREBLE, GUITAR, MUSIC.
+
+Presets and LEDs:
+- **Four LEDs for eight slots.** The clearer photo shows **LED 2 lit red**. Under SparklingTones' Spark 2 convention (red = bank A, green = bank B; UNVERIFIED on the LIVE) that is A2 = slot 1. That photo is a reference picture, not tied to any capture, so it says nothing about which slot capture 3 switched to. (An earlier, blurrier photo was first misread as LED 3.)
+- CH1 colours confirmed in capture 4: red = A, green = B (see below). # TO CONFIRM: with the live-test page open, a press moves the highlight to the slot the LEDs show.
+- **"HOLD TO SAVE"**: saving from the panel changes a slot without the app. The amp, not our cache, is the source of truth. # TO CONFIRM: what (if anything) the amp sends over BLE on a panel save — capture it with a marker.
+
+**LIVE back panel** (owner photo, 2026-09-28):
+- **MASTER**: LOW, MID, HIGH, VOL knobs.
+- **MIDI IN / OUT** (5-pin DIN). **OUTPUT** L/MONO and R jacks.
+- **CH2 INPUT** (combo jack with PUSH latch) with **its own PRESET knob** ("HOLD TO SAVE" / "PRESS TO SWITCH"), four LEDs 1–4, and a VOL knob. In the photo **LED 1 is lit green**.
+- **CH3/4 STEREO INPUT** (CH3/L, CH4/R) with a VOL knob.
+- **PAIR** button, headphone jack, **USB-C AUDIO/DATA**, **CHARGE OUT** USB-C (5 V 1.5 A).
+
+What this changes:
+- **The LIVE has at least two preset systems: CH1 (front) and CH2 (back), each with 4 LEDs.** Everything verified so far (8 slots, `0x0201`, `0x0338`, the Spark 2 preset format) was on the guitar channel, CH1. How CH2 presets are addressed over BLE — or whether they are exposed at all — is **UNVERIFIED; no source covers it**.
+- **Green does not necessarily mean "bank B".** CH2 shows green at LED 1, so colour may mark the channel, not the bank. The CH1 red/green = A/B assumption (from the Spark 2) is even less safe on the LIVE. # TO CONFIRM with the live-test page: press CH1 PRESET through all positions and note LED colour against the highlighted slot; then do the same for CH2 and see what (if anything) the amp sends.
+- Answered by capture 4 (below): only MASTER VOL (`0x0333`) and the CH2 PRESET knob (`0x0338` bank `0x03`) send anything.
+
+### Fourth capture: back panel (2026-09-28)
+Capture: `captures/2026-09-28-live-capture-4-back-panel.json`. Markers added **before** each action this time. The owner's first pass over the MASTER knobs was actually turning CH2 VOL (their marker: "redo master. that was all ch 2 vol"); the second pass is the MASTER one.
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark capture page)`:
+- **Front (CH1) PRESET press → `0x0338 [0x00, 0x04]`**; the owner saw **CH1 LED 1 green**. Slot 4 = B1, so on CH1 **red = bank A (slots 0–3), green = bank B (slots 4–7)** — the Spark 2 convention holds on the LIVE's CH1 (one data point each colour: red LED 2 in the photo, green LED 1 here).
+- **Back (CH2) PRESET press → `0x0338 [0x03, 0x00]`**; the owner saw **CH2 LED 1 red**. The first byte is **`0x03`, not `0x00`** — CH2 presets are announced on another "bank". Before the fix, `SparkTransport.trackState` took the last byte and would have recorded this as CH1 slot 0. **Fixed 2026-09-28:** `currentPreset` now only follows bank `0x00`; every switch is kept raw in `state.lastPresetSwitch`. CH2 has red and green too (photo showed green LED 1), so it likely has two banks of four as well — UNVERIFIED. How to *read* a CH2 preset (e.g. `0x0201 [0x03, n]`?) is **UNVERIFIED — do not send it without owner approval**; untested reads are low-risk but still unknown.
+- **MASTER VOL → `0x0333`**, data `[0x09, float]` (values 0.42 → 0.53 while turning). **No source documents `0x0333`**; `0x09` may be an index for the master volume — UNVERIFIED.
+- **Send nothing over BLE:** MASTER LOW, MID, HIGH; CH2 VOL; CH3/4 VOL (and, from capture 3, front GUITAR and MUSIC).
+
+### Third capture: panel knobs mapped (2026-09-28)
+Capture: `captures/2026-09-28-live-capture-3-mapping.json`, one marker per control. **The owner added each marker right after the action, not before** — the knob messages sit just before the marker naming them, and the first knob turned (Gain) precedes the first marker. Read captures that way; ask which convention was used next time.
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark capture page)` — `0x0337` param index for the amp-block panel knobs (model `94MatchDCV2`):
+
+| Panel knob | Param index |
+|---|---|
+| Gain | 0 |
+| Treble | 1 |
+| Mid | 2 |
+| Bass | 3 |
+
+- Matches SparklingTones (`src/spark-effetti.js:17`: "the knobs read Gain, Bass, Middle, Treble, Master, but the indices are Gain(0), Treble(1), Middle(2), Bass(3), Master(4)") and soundshed's amp-param table. Master (4) is not a panel knob on the LIVE.
+- **Guitar volume and Music volume send nothing** over BLE — no message of any kind while they were turned. The app cannot see them.
+- **One preset-button press → `0x0338 [0x00, 0x02]`.** # TO CONFIRM (owner): which preset the amp showed afterwards (slot 2 = A3 under the A1–A4/B1–B4 layout).
+- **`0x031a` (`91 00 03 c3`) arrives right before the first `0x0337` of a connection** — seen twice, both times immediately ahead of the first knob message, not tied to a preset switch as first thought. Meaning still **UNVERIFIED**.
+- **The amp's own seq wraps `0x7f` → `0x40`** (seen `…7e, 7f` then `40`). Amp range is `0x40`–`0x7f`. SparklingTones only says "above `0x3f`".
+
+Consequence for the controller: it can keep its cache in sync by listening, instead of polling — apply `0x0338`/`0x0337` to the cached state, then confirm with a read (`0x0201`) when it matters.
+
+## 2026-09-28 — mySpark's own SparkTransport reads the Spark LIVE
+
+First hardware run of mySpark code (not SparklingTones): `tools/live-test/` in Chrome on the Windows PC, read-only. Owner report: **"looks fine"** — connect, identify, all slots and live state displayed as expected.
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark tools/live-test)`:
+- `SparkTransport.connect()` with the **service-only filter** (`0xffc0`, no name prefix) finds the LIVE on Windows. So the capture page's name-prefix fallback was not what fixed the first failed pairing — more likely power-cycling the amp or freeing it from the phone.
+- `identify()` (`0x0211`, `0x0223`, `0x0210`), `readLibrary(8)` (`0x0201 [0x00, n]`), `readLiveState()` (`0x0201 [0x01, 0x00]`), 0x0301 reassembly and `parsePreset` work end to end.
+- # TO CONFIRM (owner): did knob turns and preset presses update the page live? (Save a session JSON to confirm, and to give us real LIVE preset bytes as test vectors.)
+
+Pitfall: `python -m http.server` must be started from the **repo root** for `tools/live-test/` (it imports `../../dist/`). An old server still running from `tools/capture/` on the same port gives a 404.
+
 ## 2026-09-26 — Soundshed protocol doc compared with our docs
 
 Source: `soundshed/soundshed-app` `docs/spark-amp-protocol.md`. Everything below is **SOURCED (soundshed)**, not hardware-verified. Soundshed's Spark 2 support is experimental.

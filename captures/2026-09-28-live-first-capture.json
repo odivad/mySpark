@@ -1,0 +1,45 @@
+{
+  "tool": "mySpark tools/capture",
+  "startedAt": "2026-09-28T20:09:43.460Z",
+  "device": {
+    "name": "Spark LIVE BLE",
+    "id": "dWJEtUU6f9QOnhqhe8MsFQ=="
+  },
+  "services": [
+    {
+      "uuid": "0000ffc0-0000-1000-8000-00805f9b34fb",
+      "characteristics": [
+        {
+          "uuid": "0000ffc1-0000-1000-8000-00805f9b34fb",
+          "props": [
+            "writeWithoutResponse"
+          ]
+        },
+        {
+          "uuid": "0000ffc2-0000-1000-8000-00805f9b34fb",
+          "props": [
+            "read",
+            "notify"
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "t": "2026-09-28T20:09:47.900Z",
+      "source": "ffc2",
+      "hex": "f0 01 40 4b 03 71 50 09 01 01 00 4d 41 06 00 00 18 f7"
+    },
+    {
+      "t": "2026-09-28T20:09:50.959Z",
+      "source": "ffc2",
+      "hex": "f0 01 41 44 03 71 50 09 01 01 00 4d 41 06 00 00 17 f7"
+    },
+    {
+      "t": "2026-09-28T20:10:02.960Z",
+      "source": "ffc2",
+      "hex": "f0 01 42 4b 03 71 50 09 01 01 00 4d 41 06 00 00 18 f7"
+    }
+  ]
+}

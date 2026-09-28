@@ -22,4 +22,4 @@ Automated tests cannot prove amp behavior. Any change to live-state or saved-slo
 
 ## Established helpers
 
-None yet. # TO CONFIRM: add a shared fake `SparkTransport` for client tests when tests are introduced.
+- `test/fixtures/fake-amp.ts` — `FakeAmp`, a fake amp behind a fake `navigator.bluetooth`, for `SparkTransport` tests. Behaves as SparklingTones describes the Spark 2 (per-chunk `0x04` ACK, `0x05` on the last, replies sharing the request seq, `0x0138` switching the playing sound). Flags: `ignoreWrites` (ACK but don't apply), `silent` (don't answer reads), `failNextWrite`. It proves the transport matches that description, not the amp.

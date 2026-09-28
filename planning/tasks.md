@@ -14,16 +14,16 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 ## Goal: working controller
 
 - [x] Test SparklingTones in Chrome on the Android phone with the Spark LIVE → accept ADR-0004 (PWA)
-- [ ] Capture real frames from the owner's **Spark GO** and **Spark LIVE** (read-only) to use as verified test vectors
+- [ ] Capture real frames from the owner's **Spark GO** and **Spark LIVE** (read-only) to use as verified test vectors — LIVE: 3 captures in `captures/` (notifications, knob map); LIVE preset-read vectors and all of the GO still to do
 - [ ] Make slot count per-model (`SlotIndex` 0–7 is VERIFIED-HW for Spark LIVE; Spark GO has 4 — SOURCED)
 
 ## Port SparklingTones (ADR-0003, approved 2026-09-28)
 
 - [x] Add `THIRD_PARTY_NOTICES.md` with SparklingTones' MIT notice (check its `NOTICE` file)
 - [x] Port `spark-protocol.js` → `src/spark/protocol.ts` (framing, 7/8-bit packing, msgpack-like types, commands); replace placeholder `SparkCommand` enum
-- [ ] Port `spark-transport.js` → `src/spark/transport.ts` (Web Bluetooth, 25-byte writes, chunking, reassembly, ACK wait)
+- [x] Port `spark-transport.js` → `src/spark/transport.ts` (Web Bluetooth, 25-byte writes, chunking, reassembly, ACK wait) — 23 tests against `FakeAmp`; not yet run on hardware
 - [ ] Codec unit tests from SparklingTones `test/fixtures/` (done) + owner's Spark LIVE captures (to do)
-- [ ] Read-back verification after every live-state and slot write
+- [ ] Read-back verification after every live-state and slot write — done for `loadPreset`, `storePreset`, `setBpm`; still to do for knob change (`0x0104`), effect on/off (`0x0115`), model change (`0x0106`)
 - [ ] Model profiles: Spark LIVE (Spark 2-style), Spark GO (Spark 40-style, from soundshed)
 
 ## ToneCloud (requested by owner 2026-09-28)
