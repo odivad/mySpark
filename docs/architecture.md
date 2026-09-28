@@ -26,7 +26,7 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 ## Platforms
 
 - Windows PC — web app
-- Android — same functions. # TO CONFIRM: delivery method (PWA via Web Bluetooth in Chrome, or Capacitor wrapper with a native BLE plugin). Decision to be recorded as an ADR.
+- Android — same functions, same code: PWA in Chrome using Web Bluetooth (ADR-0004, accepted). Capacitor wrapper only if the Android test fails or Play Store is needed.
 - Goal: build once, run in both places. Interfaces are similar across platforms.
 
 ## Stack
@@ -42,7 +42,7 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 | Lint / format | ESLint + Prettier (defaults) | planned |
 | CI | GitHub Actions | later |
 | UI framework | — | # TO CONFIRM |
-| BLE access | Web Bluetooth and/or native plugin | # TO CONFIRM (depends on Android delivery) |
+| BLE access | Web Bluetooth (PC + Android) | ADR-0004 — Android verified 2026-09-28 |
 | Persistence | Local JSON files (preset backups/exports) | planned |
 
 ## Layers (from `docs/spark2-bt-protocol.md`)

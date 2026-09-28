@@ -11,5 +11,5 @@ Everything new lands here first. Only the owner moves an item to `tasks.md`.
 - **Reconcile our protocol docs with soundshed's** once real captures exist — see `knowledge/lessons-learned.md`.
 - **GitHub Actions CI** — build, lint, test, `npm audit`, secret scanning.
 - **UI framework choice** for the web/Android app.
-- **Positive Grid cloud/account integration** — secrets identified in session; no scope defined.
+- **ToneCloud login features** (own presets, favorites, uploading) — needs PG credentials (`POST /auth`); needs a plan for handling the password and token safely in a PWA. Browsing is in `tasks.md`.
 - **Hosting/deploy** for the web app — tokens identified in session; target not chosen.

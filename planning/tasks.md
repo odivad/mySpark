@@ -13,7 +13,7 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 
 ## Goal: working controller
 
-- [ ] Decide Android delivery (PWA vs. Capacitor) — ADR-0004
+- [x] Test SparklingTones in Chrome on the Android phone with the Spark LIVE → accept ADR-0004 (PWA)
 - [ ] Capture real frames from the owner's **Spark GO** and **Spark LIVE** (read-only) to use as verified test vectors
 - [ ] Make slot count per-model (`SlotIndex` 0–7 is VERIFIED-HW for Spark LIVE; Spark GO has 4 — SOURCED)
 
@@ -25,3 +25,11 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [ ] Codec unit tests from SparklingTones `test/fixtures/` + owner captures
 - [ ] Read-back verification after every live-state and slot write
 - [ ] Model profiles: Spark LIVE (Spark 2-style), Spark GO (Spark 40-style, from soundshed)
+
+## ToneCloud (requested by owner 2026-09-28)
+
+- [ ] Browse/search Positive Grid ToneCloud from the app (no login; direct `GET https://api.positivegrid.com/v2/preset…`, see lessons-learned)
+- [ ] Convert a ToneCloud `preset_data` into our preset model; check every `dspId` against the target amp's model list before sending
+- [ ] Load a ToneCloud preset into the amp's live buffer `0x7f` (try before saving); saving to a slot follows the slot-write rules
+- [ ] Save ToneCloud presets to the local library (JSON)
+

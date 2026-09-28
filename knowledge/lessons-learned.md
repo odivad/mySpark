@@ -115,5 +115,24 @@ Record the answer here once the owner captures real Spark 2 frames.
 ### Soundshed warns invalid settings can crash the amp
 "Invalid settings may crash amp, requiring amp to be switched off and on again." Reinforces the approval + hardware-test rule for writes.
 
+## 2026-09-28 — Positive Grid ToneCloud access
+
+Source: soundshed-app `src/spork/src/devices/spark/sparkAPI.ts` (SOURCED), plus two read-only probes by the AI on 2026-09-28 (no credentials sent).
+
+- Base URL: `https://api.positivegrid.com/v2`. **Unofficial, undocumented API** — Positive Grid can change or block it at any time.
+- **Browsing needs no login:**
+  - search: `GET /preset?page=1&page_size=N&preset_for=spark[&keyword=…]` → array of preset summaries
+  - one preset: `GET /preset/{id}` → includes `preset_data`
+  - by creator: `GET /user_create/{userId}?page=&page_size=&preset_for=spark`
+- **CORS allows browser calls:** `Access-Control-Allow-Origin: *` (probed 2026-09-28). The PWA can call it directly; no proxy needed for browsing. (Soundshed's web build uses its own proxy `api-proxy.soundshed.com` — we must not route anything through a third-party proxy.)
+- `preset_data` is a JSON string with the Spark preset shape: `sigpath` = 7 blocks `{dspId, active, params:[{index, value 0–1}]}`, plus `bpm`, `meta {id, name, version, description, icon}`, `loudness`, `extraGain`. `dspId` values (`bias.noisegate`, `ADClean`, `bias.reverb` …) are the amp's internal model names — same kind SparklingTones sends.
+- **Login** (`POST /auth {username, password}` → JWT, sent as `Authorization: JWT <token>`) is only needed for account features (own presets, favorites). Not probed.
+- # TO CONFIRM: other `preset_for` values (Spark 2 / LIVE / GO may have their own); whether ToneCloud "spark" presets use models the LIVE or GO don't have.
+
+Risks:
+- **Model mismatch can freeze the amp** (SparklingTones warning). Check every `dspId` against the target amp's known model list before sending.
+- Use of an unofficial API may conflict with Positive Grid's terms. Personal use, low request rate, no bulk downloading or redistribution.
+- PG credentials are a secret (`docs/security.md`): never stored in code, repo, or localStorage in plain text.
+
 ### No `.gitignore`
 The repo had no `.gitignore` at setup time, so `node_modules/`, `dist/`, and any future `.env` were not excluded.

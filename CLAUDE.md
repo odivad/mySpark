@@ -12,7 +12,7 @@ mySpark is a personal controller for the owner's Positive Grid **Spark GO** and 
 - Plan: port SparklingTones' protocol/transport to TypeScript with attribution (ADR-0003).
 
 - Targets: **Windows PC (web)** and **Android**, with the same functions on both — build once, run in both places.
-- Delivery for Android (PWA via Web Bluetooth vs. Capacitor wrapper) is **undecided**. # TO CONFIRM: Android delivery — see ADR-0001.
+- Delivery: **one installable web app (PWA) using Web Bluetooth** for both — Chrome/Edge on the PC, Chrome on Android (ADR-0004, accepted — Android test passed 2026-09-28).
 - Stage: greenfield. The code in `src/` is a protocol/client skeleton, not yet tested against real hardware.
 - Team: one person (owner) holds the developer, lead, and security-owner roles.
 
