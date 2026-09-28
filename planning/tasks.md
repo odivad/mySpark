@@ -8,8 +8,8 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [x] Add `.env.example` (variable names only)
 - [x] Make the first commit, including the ground-truth files
 - [ ] Add ESLint + Prettier with default settings; record config locations in `docs/coding-standards.md`
-- [ ] Add Vitest; write unit tests for the frame codec
-- [ ] Label every protocol constant in `src/spark/` with `VERIFIED-HW` / `SOURCED` / `UNVERIFIED` (see `knowledge/lessons-learned.md`)
+- [x] Add Vitest; write unit tests for the frame codec (46 tests, ported from SparklingTones)
+- [x] Label every protocol constant in `src/spark/` with `VERIFIED-HW` / `SOURCED` / `UNVERIFIED` (see `knowledge/lessons-learned.md`)
 
 ## Goal: working controller
 
@@ -19,10 +19,10 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 
 ## Port SparklingTones (ADR-0003, approved 2026-09-28)
 
-- [ ] Add `THIRD_PARTY_NOTICES.md` with SparklingTones' MIT notice (check its `NOTICE` file)
-- [ ] Port `spark-protocol.js` → `src/spark/protocol.ts` (framing, 7/8-bit packing, msgpack-like types, commands); replace placeholder `SparkCommand` enum
+- [x] Add `THIRD_PARTY_NOTICES.md` with SparklingTones' MIT notice (check its `NOTICE` file)
+- [x] Port `spark-protocol.js` → `src/spark/protocol.ts` (framing, 7/8-bit packing, msgpack-like types, commands); replace placeholder `SparkCommand` enum
 - [ ] Port `spark-transport.js` → `src/spark/transport.ts` (Web Bluetooth, 25-byte writes, chunking, reassembly, ACK wait)
-- [ ] Codec unit tests from SparklingTones `test/fixtures/` + owner captures
+- [ ] Codec unit tests from SparklingTones `test/fixtures/` (done) + owner's Spark LIVE captures (to do)
 - [ ] Read-back verification after every live-state and slot write
 - [ ] Model profiles: Spark LIVE (Spark 2-style), Spark GO (Spark 40-style, from soundshed)
 

@@ -4,10 +4,10 @@ Write here after a bug, review, near-miss, or hardware test — before the next 
 
 ## 2026-09-26 — Ground-truth setup session
 
-### `SparkCommand` values have no source
+### `SparkCommand` values have no source — RESOLVED 2026-09-28 (replaced by the SparklingTones port, ADR-0003)
 `src/spark/protocol.ts` defines `SparkCommand` values (`ReadState = 0x01`, `SetParameter = 0x10`, `SavePreset = 0x20`, …). Neither `docs/spark-interface-spec.md` nor `docs/spark2-bt-protocol.md` defines numeric command bytes — §9 of the spec lists command *families* only. These values are **UNVERIFIED placeholders**. Do not send them to the amp. Replace with `SOURCED` values from SparklingTones, then confirm on hardware.
 
-### Codec skips 7/8-bit packing
+### Codec skips 7/8-bit packing — RESOLVED 2026-09-28 (SparklingTones port)
 `SparkFrameCodec.parseFrame` / `buildFrame` treat the payload as raw bytes and compute the XOR checksum over them. The spec (§4.1–4.2) says the payload is 7/8-bit packed and the checksum covers the *packed* bytes. The current codec will not interoperate with the amp as written.
 
 ### Spark 40 vs. Spark 2

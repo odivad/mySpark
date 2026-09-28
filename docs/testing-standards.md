@@ -2,7 +2,7 @@
 
 ## Framework
 
-**Vitest.** # TO CONFIRM: not yet installed — see `planning/tasks.md`.
+**Vitest 5.** Run with `npm test`. Tests live in `test/`, fixtures in `test/fixtures/` (each file states its source and verification status).
 
 ## Required tests
 

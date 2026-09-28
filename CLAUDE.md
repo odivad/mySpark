@@ -20,7 +20,7 @@ mySpark is a personal controller for the owner's Positive Grid **Spark GO** and 
 
 - TypeScript 5.7, `strict: true`, target ES2022, `module`/`moduleResolution: NodeNext`
 - npm; `tsx` for dev; `tsc` for build (`npm run build` → `dist/`)
-- Tests: Vitest (to be added — see `planning/tasks.md`)
+- Tests: Vitest 5 (`npm test`); protocol tests ported from SparklingTones, on real captures
 - Lint/format: ESLint + Prettier, default settings (to be added)
 - Persistence: local JSON files for preset backups/exports. The amp remains the source of truth.
 
@@ -69,9 +69,8 @@ Protocol and architecture references: `docs/spark-interface-spec.md`, `docs/spar
 
 ```bash
 npm install
+npm test          # Vitest — must pass before any protocol change is accepted
 npm run build     # tsc → dist/
-npm run dev       # tsx watch src/index.ts
-npm start         # node dist/index.js
 ```
 
 ## Session limits to remember

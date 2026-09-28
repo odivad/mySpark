@@ -38,7 +38,7 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 | Package manager | npm | in place |
 | Build | `tsc` → `dist/` | in place |
 | Dev runner | `tsx` | in place |
-| Tests | Vitest | planned |
+| Tests | Vitest 5 (`npm test`, tests in `test/`) | in place |
 | Lint / format | ESLint + Prettier (defaults) | planned |
 | CI | GitHub Actions | later |
 | UI framework | — | # TO CONFIRM |
