@@ -8,9 +8,20 @@ Overview of how mySpark is built. Detailed protocol and state-model docs already
 
 Those docs are **SOURCED** (from SparklingTones and related projects), not hardware-verified. See `docs/official-sources.md` for authority order.
 
+**Those docs describe the Spark 2, which is not a target (ADR-0002).** Their general architecture (amp as source of truth, write verification, live vs. saved state) still applies. Their byte-level details do not carry over to the GO or LIVE without evidence.
+
 ## Purpose
 
-Personal controller for the owner's Positive Grid Spark 2 over BLE: read and change presets, effects, and parameters, and back up presets to local JSON files.
+Personal controller for the owner's Positive Grid **Spark GO** and **Spark LIVE** over BLE: read and change presets, effects, and parameters, and back up presets to local JSON files.
+
+## Target amps
+
+| Model | Protocol knowledge | Status |
+|---|---|---|
+| Spark GO | Spark 40-family per soundshed: service `ffc0`, write `ffc1`, notify `ffc2`, 4 slots, `04` chunk ACKs, no live sync, writes sized by MTU | SOURCED (soundshed) — first target |
+| Spark LIVE | No public docs. SparklingTones (Spark 2 app) reads it fully: BLE name `Spark LIVE BLE`, service `ffc0`, **8 slots (A1–A4, B1–B4)**, Spark 2-style get-preset and decoding | VERIFIED-HW (owner, via SparklingTones, 2026-09-28): read all slots, live buffer upload `0x7f`, preset switch, knob change `0x0104`, effect on/off `0x0115`, model change `0x0106`, slot write. **UNVERIFIED:** BPM/looper, power-cycle persistence, non-guitar channels |
+
+The model is detected at connect time (BLE device name, then `02 11` get-amp-name if confirmed). Per-model behavior (slot count, ACK flow, write size) lives in a model profile, not in hardcoded constants.
 
 ## Platforms
 

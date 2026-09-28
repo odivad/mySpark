@@ -1,5 +1,7 @@
 # Spark 2 architecture notes
 
+> **Reference only — Spark 2.** This project targets the Spark GO and Spark LIVE, not the Spark 2 (see `docs/decisions/ADR-0002-target-amps.md`). General architecture ideas here still apply; byte-level details do not carry over without hardware evidence.
+
 This document is intentionally limited to the architectural model of the Spark 2 system as reverse-engineered in the SparklingTones project. It focuses on the system structure, state model, and responsibilities, not on raw byte-level protocol details.
 
 ## 1) System overview

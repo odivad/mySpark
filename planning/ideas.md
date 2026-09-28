@@ -7,6 +7,8 @@ Everything new lands here first. Only the owner moves an item to `tasks.md`.
 - **Implement 7/8-bit packing/unpacking** in the codec per `docs/spark-interface-spec.md` §4.1.
 - **Fragment reassembly** for notify characteristic `0xFFC2`.
 - **Preset backup/export to local JSON files** (confirmed data store; feature not yet scheduled).
+- **Use the soundshed Spark amp simulator for testing** (`soundshed-app/tools/spark-amp-simulator`, MIT) — has a `spark-2` profile over TCP, so the client can be tested without risking the real amp. BLE peripheral mode needs `@stoprocent/bleno` (new dependency — needs approval).
+- **Reconcile our protocol docs with soundshed's** once real captures exist — see `knowledge/lessons-learned.md`.
 - **GitHub Actions CI** — build, lint, test, `npm audit`, secret scanning.
 - **UI framework choice** for the web/Android app.
 - **Positive Grid cloud/account integration** — secrets identified in session; no scope defined.

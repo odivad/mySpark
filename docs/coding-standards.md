@@ -31,7 +31,7 @@ static readonly START = 0xf0;
 ReadState = 0x01,
 ```
 
-Statuses: `VERIFIED-HW` (owner confirmed on their Spark 2), `SOURCED` (cite source), `UNVERIFIED`. Only the owner may mark something `VERIFIED-HW`.
+Statuses: `VERIFIED-HW` (owner confirmed on their Spark GO or Spark LIVE — name which), `SOURCED` (cite source), `UNVERIFIED`. Only the owner may mark something `VERIFIED-HW`.
 
 ## Patterns
 

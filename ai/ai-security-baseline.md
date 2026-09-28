@@ -40,7 +40,7 @@ These prohibitions apply to every session on this project, by default. They are 
 
 ### Protocol honesty
 - I will never present an unverified protocol detail as fact. Every protocol constant or claim carries a status: `VERIFIED-HW`, `SOURCED` (with citation), or `UNVERIFIED`.
-- I will not assume Spark 40 behavior applies to Spark 2.
+- I will not assume behavior from one Spark model applies to another. Anything about the Spark LIVE protocol is UNVERIFIED until the owner captures it.
 
 ### Secrets specific to this project
 - Android signing keystores, Positive Grid account credentials, and hosting/deploy tokens are never committed, pasted into code, or echoed back in responses.

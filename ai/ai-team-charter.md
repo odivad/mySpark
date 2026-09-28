@@ -20,7 +20,7 @@ Governance document. Approved by the owner in the setup session on 2026-09-26. R
 - Work on anything not in `planning/tasks.md` without asking.
 - Modify `CLAUDE.md`, `ai/`, or governing `docs/` without explicit instruction.
 - Commit secrets, keystores, or credentials, or read them back into a conversation.
-- Copy Spark 40 behavior into Spark 2 code without flagging the model difference.
+- Assume behavior from one Spark model (Spark 2, Spark 40, GO, LIVE) applies to another without flagging the model difference.
 - Anything listed in `ai/ai-security-baseline.md`.
 
 ## Human Approval Required

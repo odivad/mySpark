@@ -4,7 +4,12 @@ AI operating file for this repository. Read this first, every session. Then read
 
 ## What this project is
 
-mySpark is a personal controller for a **Positive Grid Spark 2** amplifier over Bluetooth Low Energy (BLE). Near-term goal: a **working controller** that can read and change presets, effects, and parameters on the owner's amp.
+mySpark is a personal controller for the owner's Positive Grid **Spark GO** and **Spark LIVE** amplifiers over Bluetooth Low Energy (BLE). Near-term goal: a **working controller** that can read and change presets, effects, and parameters on those amps.
+
+- **Not a Spark 2 project.** The owner has no Spark 2. The Spark 2 docs in `docs/` are reference only (ADR-0002).
+- **Spark LIVE** — guitar channel speaks the **Spark 2 protocol**: every core operation verified on the owner's LIVE via SparklingTones (2026-09-28). Details: `knowledge/lessons-learned.md`.
+- **Spark GO** — Spark 40-family protocol per soundshed (SOURCED, not yet tested).
+- Plan: port SparklingTones' protocol/transport to TypeScript with attribution (ADR-0003).
 
 - Targets: **Windows PC (web)** and **Android**, with the same functions on both — build once, run in both places.
 - Delivery for Android (PWA via Web Bluetooth vs. Capacitor wrapper) is **undecided**. # TO CONFIRM: Android delivery — see ADR-0001.
@@ -42,14 +47,14 @@ Protocol and architecture references: `docs/spark-interface-spec.md`, `docs/spar
 
 1. **The amp is the source of truth.** Local state and JSON files are caches/projections. A write is only successful after it is read back from the amp and confirmed.
 2. **Never invent protocol details.** This is the owner's biggest concern. Every protocol claim (command bytes, offsets, encodings, GATT UUIDs, behaviors) must carry a verification status:
-   - `VERIFIED-HW` — confirmed by the owner on their Spark 2
+   - `VERIFIED-HW` — confirmed by the owner on their Spark GO or Spark LIVE (name which)
    - `SOURCED` — documented in SparklingTones (or another listed source), not yet hardware-verified — cite the source
    - `UNVERIFIED` — inferred, guessed, or placeholder
    Mark it in a code comment next to the constant, and in docs. If you don't know, say so and mark it `UNVERIFIED` — never present a guess as fact.
-3. **Spark 2 ≠ Spark 40.** Sources mix models. Do not assume Spark 40 behavior applies to Spark 2 without saying so.
+3. **Models differ.** Sources mix Spark 40, Mini, GO, 2, and LIVE. Always name the model a detail comes from, and never assume it carries over to the GO or LIVE without evidence. Detect the model at connect time; don't hardcode one model's slot count or ACK behavior.
 4. **Human approval + hardware test required** for any code that changes live amp state or writes to saved preset slots.
 5. **Firmware update and system-level commands are banned.** Never implement them.
-6. **Source priority:** the owner's amp > SparklingTones > other repos.
+6. **Source priority:** the owner's amps > SparklingTones > soundshed > other repos (ADR-0003). SparklingTones is proven on the owner's Spark LIVE; soundshed is the Spark GO reference.
 7. New ideas go to `planning/ideas.md`. Work only on `planning/tasks.md` items.
 8. When a change modifies an approved pattern or architecture decision, update the matching doc in the same change.
 

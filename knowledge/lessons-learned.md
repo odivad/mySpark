@@ -13,8 +13,107 @@ Write here after a bug, review, near-miss, or hardware test — before the next 
 ### Spark 40 vs. Spark 2
 Several reference sources describe the Spark 40. Details from them are not safe to assume for Spark 2. Tag the model when citing.
 
+## 2026-09-28 — The target amp was wrong
+
+The whole initial setup assumed a **Spark 2** because the starting docs came from SparklingTones (a Spark 2 project). The owner has a **Spark GO** and a **Spark LIVE** and no Spark 2. Caught two days in, before any hardware code was written. See ADR-0002.
+
+Lesson: in the setup session, ask "which exact hardware do you own?" instead of inferring it from the docs already in the repo.
+
+- Spark GO: Spark 40-family per soundshed (`ffc0`/`ffc1`/`ffc2`, 4 slots, `04` ACKs, no live sync). SOURCED.
+- Spark LIVE: no public protocol docs found (soundshed, SparklingTones, GitHub search). UNVERIFIED — captures only.
+- Soundshed contradicts itself on Spark 2: its protocol doc says primary service `ffc0` with `ffc8` secondary; its simulator's `spark-2` profile uses `ffc8`/`ffc9`/`ffca`. Irrelevant now, but a reminder that docs disagree.
+- `SlotIndex` (0–7) in `src/spark/types.ts` came from the Spark 2 docs; Spark GO has 4 slots.
+- The Spark 2 sections below (soundshed comparison) remain as reference, not as targets.
+
+### Owner report: SparklingTones can read the Spark LIVE (2026-09-28)
+The owner connected the SparklingTones web app (a Spark 2 app) to their **Spark LIVE** and it read the amp. First real evidence about the LIVE.
+
+- SparklingTones' BLE filter is `services: [0xffc0]` only (no name check), so the LIVE **advertises service `0xFFC0`** — `VERIFIED-HW (owner, via SparklingTones)`.
+- SparklingTones' read path (`0x0201` get preset, Spark 2 conventions: 25-byte writes, one seq per multi-chunk message, trailing `0x00`) worked on the LIVE → the LIVE likely speaks the Spark-family protocol, possibly Spark 2-style. **Likely, not proven** — # TO CONFIRM what exactly was read (see below).
+- Writes from SparklingTones to the LIVE: **not tested**. Do not assume they work.
+- SparklingTones (tested on real Spark 2 hardware) uses `ffc0`/`ffc1`/`ffc2` for Spark 2 — contradicting soundshed's simulator (`ffc8`). SparklingTones is the hardware-backed answer.
+- SparklingTones is **MIT licensed** and is a PWA for Chrome on PC and Android — the same shape as mySpark's goal. Reusing its code with attribution is allowed.
+
+**Confirmed by owner screenshots, 2026-09-28** — `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`:
+- BLE device name: **`Spark LIVE BLE`**.
+- **8 preset slots**, shown as banks **A1–A4, B1–B4** — same layout as Spark 2. SparklingTones log: `read 8 presets from the amp: 0 new, 8 updated`. All 8 preset names decoded correctly (e.g. "Rhythm Guitar Style Tone 1" A1, "my bass" B1, "Upright Bass" B2).
+- So the Spark 2-style read path works on the LIVE: `0x0201` get-preset for all 8 slots, preset decoding, 7/8-bit unpacking, multi-chunk reassembly.
+- No errors or disconnects during the read.
+- The log also showed `my bass — B1` / `Rhythm Guitar Style Tone 1 — A1` after the read — likely current-preset change notifications. # TO CONFIRM: were presets switched on the amp while connected?
+- Consequence: `SlotIndex` 0–7 is right for the LIVE; per-model slot counts are still needed for the GO (4, SOURCED).
+
+### First write to the Spark LIVE: preset upload to the live buffer works (2026-09-28)
+The owner pressed **Tweak** in SparklingTones on "Rhythm Guitar Style Tone 1" (A1). With the amp connected, Tweak (`apriEditor` in SparklingTones `index.html`) does:
+1. `0x0101` multi-chunk preset upload to the **software buffer `[0x00, 0x7f]`** (Spark 2 style: 25-byte writes, one seq for all chunks)
+2. `0x0138` switch to `0x7f`
+3. ~400 ms wait, then read live state, and open the editor from the amp's answer
+
+The editor opened with a fully decoded chain → all three steps succeeded. `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`:
+- Live-buffer preset upload + switch + read-back work on the LIVE.
+- The LIVE's guitar-channel preset format matches Spark 2: 7-block chain (Noise Gate, Comp/Wah, Drive, Amp, Modulation, Delay, Reverb), per-block on/off, model names (e.g. amp `ODS 50` — "Dumble ODS 50 HRM"), knob values (Gain 7.1, Bass 4.6, Middle 3.6, Treble 6.6, Master 6.2), tempo 120 bpm.
+- **No saved slot was written.** The `0x7f` buffer is temporary.
+
+# TO CONFIRM (owner): did the amp's LED blink after Tweak (SparklingTones says it blinks while playing the software buffer)?
+
+### Knob changes work on the Spark LIVE (2026-09-28)
+Owner turned knobs in the SparklingTones Tweak editor: **the changes reached the LIVE and sounded correct.** `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`.
+
+Command used (SparklingTones `src/spark-protocol.js`, `changeParam`):
+`cmd 0x01 sub 0x04` — data: prefixed-string effect name, param index byte, float 0.0–1.0, **trailing `0x00`** (Spark 2 rule: without it the amp ACKs but does nothing).
+- SparklingTones uses `0x0104` for amp knobs too. Soundshed lists `0x0337` for amp knobs (Spark 40). On the LIVE, `0x0104` works for the amp block.
+- These are live-state writes only: switching preset on the amp restores the saved version.
+
+### Slot write attempted on the Spark LIVE (2026-09-28) — persistence NOT yet confirmed
+Owner used SparklingTones **"Send to HW preset"**. SparklingTones `storePreset` (`src/spark-transport.js`):
+1. `0x0101` multi-chunk upload addressed **directly to the slot** `[0x00, slot]` — not via `0x7f` + `0x0127` (`0x0127` save does not work on Spark 2)
+2. 300 ms wait, `0x0138` to another slot, 300 ms, `0x0138` back — without this round trip the Spark 2 keeps reporting the old slot content
+3. **No read-back verification** — ACK only. Per our rules, ACK ≠ executed.
+
+Status: **slot write works** — owner re-read the amp and the change is in the slot (2026-09-28). `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`.
+# TO CONFIRM (owner): survives power-off/on.
+
+### Effect on/off and effect model change work on the Spark LIVE (2026-09-28)
+Owner report — `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`:
+- **Effect on/off** — `0x0115`: prefixed-string effect name, `c3`/`c2`, trailing `0x00`.
+- **Effect model change** — `0x0106`: prefixed-string old name, prefixed-string new name, trailing `0x00`. Worked for the model(s) the owner chose; SparklingTones only offers models from its catalogue, and asking for a model the amp lacks can freeze a Spark 2 — keep that guard.
+
+### Summary: SparklingTones' Spark 2 protocol works on the Spark LIVE guitar channel
+As of 2026-09-28 every core operation has been exercised on the owner's LIVE through SparklingTones: read all 8 slots, read live state, upload to live buffer, switch preset, knob change, effect on/off, model change, slot write. The LIVE's guitar-channel control protocol is, in practice, the Spark 2 protocol as documented by SparklingTones.
+Not yet exercised: BPM/looper (`0x0176`), power-cycle persistence of a slot write, and anything specific to the LIVE's other channels (mic/aux) — no source covers those.
+
+Lesson for mySpark: our slot-write must read the slot back (`0x0201 [0x00, slot]`) and compare, per `knowledge/approved-patterns.md` §1 — SparklingTones skips this.
+
+**Still untested on the LIVE:**
+- Effect on/off (`0x0115`), BPM (`0x0176`).
+- Changing a block's model — SparklingTones notes asking for a model the amp doesn't have can freeze a Spark 2. The LIVE's model list may differ.
+
 ### Protocol details are unverified overall
 Nothing in `docs/` or `src/` has yet been confirmed on the owner's amp. Treat all protocol content as `SOURCED` at best until hardware captures exist.
+
+## 2026-09-26 — Soundshed protocol doc compared with our docs
+
+Source: `soundshed/soundshed-app` `docs/spark-amp-protocol.md`. Everything below is **SOURCED (soundshed)**, not hardware-verified. Soundshed's Spark 2 support is experimental.
+
+### Confirms our `SparkCommand` values are wrong
+Soundshed's command bytes are cmd/sub pairs, e.g. GET preset `02 01`, knob change `01 04`, effect toggle `01 15`, switch preset `01 38`, store to slot `03 27`, amp knob `03 37`. None match our enum.
+
+### Framing disagreement — must be settled by a hardware capture
+- Our spec: `F0 01 <seq> <checksum> <cmd> <sub> <data> F7`.
+- Soundshed: a 16-byte **block header** comes first — `01 fe 00 00 <dir> <size> 00×9`, with direction `53 fe` (to amp) / `41 ff` (from amp) — then the `F0 01 … F7` chunk.
+- Soundshed hardcodes the seq/checksum bytes as `3a 15` and says the amp does not appear to validate them. Our spec says XOR checksum.
+Record the answer here once the owner captures real Spark 2 frames.
+
+### Spark 2 specifics (soundshed)
+- 8 preset slots (matches our `SlotIndex` 0–7). Soundshed's `00`–`03` slot ranges are Spark 40.
+- Cap each BLE write at **100 bytes** regardless of MTU.
+- Preset upload is **chunk-acked**: wait for ACK `05 01` per chunk, `04 01` on the final chunk. All chunks share one sequence number.
+- ~500 ms delay before the preset switch after upload, or the amp may discard the tone.
+- Knob changes (`01 04`) produce **no ACK** — only a read-back can verify them.
+- A second BLE service `0xFFC8` (`ffc9`/`ffca`) exists, described as **firmware and pedal control**. Firmware commands are banned (`docs/security.md`); do not write to this service without owner approval.
+- Payload values use MessagePack-like types (`ca` + big-endian float32, `c2`/`c3` booleans, `a0+len` strings).
+
+### Soundshed warns invalid settings can crash the amp
+"Invalid settings may crash amp, requiring amp to be switched off and on again." Reinforces the approval + hardware-test rule for writes.
 
 ### No `.gitignore`
 The repo had no `.gitignore` at setup time, so `node_modules/`, `dist/`, and any future `.env` were not excluded.

@@ -1,6 +1,6 @@
 # ADR-0001: Initial project setup and ground truth
 
-- Status: Accepted
+- Status: Accepted — target amp amended by ADR-0002 (Spark GO + Spark LIVE, not Spark 2)
 - Date: 2026-09-26
 - Decider: project owner
 
@@ -27,7 +27,7 @@ mySpark is a personal BLE controller for a Positive Grid Spark 2. The repo had a
 
 ## Open
 
-- **Android delivery:** PWA via Web Bluetooth (one codebase, Chrome on Android, no store) vs. Capacitor wrapper (native BLE plugin, Play Store possible). Undecided → ADR-0002.
+- **Android delivery:** PWA via Web Bluetooth (one codebase, Chrome on Android, no store) vs. Capacitor wrapper (native BLE plugin, Play Store possible). Undecided → ADR-0004.
 - UI framework — undecided.
 
 ## Alternatives considered

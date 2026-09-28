@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spark Capture</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --line:#ddd; --accent:#0a66c2; --rx:#0a7d32; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141414; --fg:#eee; --muted:#999; --line:#333; --accent:#6aa7ff; --rx:#5fd08a; }
+  }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  p.note { color:var(--muted); margin:0 0 12px; font-size:0.9rem; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:0.4; cursor:default; }
+  #status { margin-bottom:8px; font-weight:600; }
+  #info { color:var(--muted); font-size:0.85rem; margin-bottom:12px; white-space:pre-wrap; }
+  #log { font:12px/1.5 ui-monospace, Consolas, monospace; border:1px solid var(--line); border-radius:6px; padding:8px; height:60vh; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+  .rx { color:var(--rx); }
+  .sys { color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>Spark Capture (read-only)</h1>
+<p class="note">Listens to notifications from a Spark amp. <strong>Never writes to the amp.</strong> After connecting, turn knobs, switch presets, and toggle effects on the amp. Each change should appear here. Close the Spark app and SparklingTones first, since only one app can connect at a time.</p>
+
+<div class="bar">
+  <button id="connect" class="primary">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+  <button id="mark" disabled>Add marker</button>
+  <button id="save" disabled>Save capture (JSON)</button>
+  <button id="clear">Clear</button>
+</div>
+<div id="status">Not connected</div>
+<div id="info"></div>
+<div id="log"></div>
+
+<script>
+// Read-only by design: this page never calls writeValue* on any characteristic.
+const SERVICE_MAIN = 0xffc0;   // SOURCED: SparklingTones + soundshed; VERIFIED-HW on Spark LIVE (owner, via SparklingTones)
+const CHAR_NOTIFY = 0xffc2;    // SOURCED: SparklingTones + soundshed
+const SERVICE_ALT = 0xffc8;    // SOURCED: soundshed (Spark 2 secondary). Listen only, if present.
+const CHAR_ALT_NOTIFY = 0xffca;
+
+const $ = (id) => document.getElementById(id);
+const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(' ');
+let device = null;
+const capture = { tool: 'mySpark tools/capture', startedAt: null, device: null, services: [], events: [] };
+
+function log(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = text;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+function onNotify(source) {
+  return (event) => {
+    const bytes = new Uint8Array(event.target.value.buffer);
+    const t = new Date().toISOString();
+    capture.events.push({ t, source, hex: hex(bytes) });
+    log(`${t.slice(11, 23)}  ${source}  [${bytes.length}]  ${hex(bytes)}`, 'rx');
+  };
+}
+
+async function listen(server, serviceUuid, charUuid, label) {
+  try {
+    const service = await server.getPrimaryService(serviceUuid);
+    const ch = await service.getCharacteristic(charUuid);
+    ch.addEventListener('characteristicvaluechanged', onNotify(label));
+    await ch.startNotifications();
+    log(`Listening on ${label}`, 'sys');
+    return true;
+  } catch (e) {
+    log(`${label}: not available (${e.message})`, 'sys');
+    return false;
+  }
+}
+
+$('connect').onclick = async () => {
+  if (!navigator.bluetooth) {
+    $('status').textContent = 'Web Bluetooth not available. Use Chrome or Edge, served from localhost or https.';
+    return;
+  }
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_MAIN] }],
+      optionalServices: [SERVICE_ALT],
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      $('status').textContent = 'Disconnected';
+      log('Disconnected', 'sys');
+      setConnected(false);
+    });
+    $('status').textContent = `Connecting to ${device.name || 'unnamed device'}…`;
+    const server = await device.gatt.connect();
+
+    capture.startedAt = new Date().toISOString();
+    capture.device = { name: device.name || null, id: device.id };
+    const services = await server.getPrimaryServices();
+    capture.services = [];
+    for (const s of services) {
+      const chars = await s.getCharacteristics().catch(() => []);
+      capture.services.push({
+        uuid: s.uuid,
+        characteristics: chars.map((c) => ({
+          uuid: c.uuid,
+          props: ['read', 'write', 'writeWithoutResponse', 'notify', 'indicate'].filter((k) => c.properties[k]),
+        })),
+      });
+    }
+    $('info').textContent = `Device name: ${device.name || '(none)'}\nServices:\n` +
+      capture.services.map((s) => `  ${s.uuid}\n` + s.characteristics.map((c) => `    ${c.uuid}  ${c.props.join(', ')}`).join('\n')).join('\n');
+
+    await listen(server, SERVICE_MAIN, CHAR_NOTIFY, 'ffc2');
+    await listen(server, SERVICE_ALT, CHAR_ALT_NOTIFY, 'ffca');
+
+    $('status').textContent = `Connected: ${device.name || 'unnamed device'}. Now change things on the amp.`;
+    setConnected(true);
+  } catch (e) {
+    $('status').textContent = `Could not connect: ${e.message}`;
+  }
+};
+
+$('disconnect').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); };
+
+$('mark').onclick = () => {
+  const label = prompt('Marker label (what are you about to do on the amp?)');
+  if (!label) return;
+  const t = new Date().toISOString();
+  capture.events.push({ t, marker: label });
+  log(`---- ${label} ----`, 'sys');
+};
+
+$('save').onclick = () => {
+  const blob = new Blob([JSON.stringify(capture, null, 2)], { type: 'application/json' });
+  const name = (capture.device && capture.device.name ? capture.device.name : 'spark').replace(/\W+/g, '-');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `capture-${name}-${capture.startedAt.replace(/[:.]/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+$('clear').onclick = () => { $('log').textContent = ''; capture.events = []; };
+
+function setConnected(on) {
+  $('connect').disabled = on;
+  $('disconnect').disabled = !on;
+  $('mark').disabled = !on;
+  $('save').disabled = !on && capture.events.length === 0;
+}
+</script>
+</body>
+</html>

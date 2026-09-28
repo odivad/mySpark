@@ -13,5 +13,15 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 
 ## Goal: working controller
 
-- [ ] Decide Android delivery (PWA vs. Capacitor) — ADR-0002
-- [ ] Capture real frames from the owner's Spark 2 to use as verified test vectors
+- [ ] Decide Android delivery (PWA vs. Capacitor) — ADR-0004
+- [ ] Capture real frames from the owner's **Spark GO** and **Spark LIVE** (read-only) to use as verified test vectors
+- [ ] Make slot count per-model (`SlotIndex` 0–7 is VERIFIED-HW for Spark LIVE; Spark GO has 4 — SOURCED)
+
+## Port SparklingTones (ADR-0003, approved 2026-09-28)
+
+- [ ] Add `THIRD_PARTY_NOTICES.md` with SparklingTones' MIT notice (check its `NOTICE` file)
+- [ ] Port `spark-protocol.js` → `src/spark/protocol.ts` (framing, 7/8-bit packing, msgpack-like types, commands); replace placeholder `SparkCommand` enum
+- [ ] Port `spark-transport.js` → `src/spark/transport.ts` (Web Bluetooth, 25-byte writes, chunking, reassembly, ACK wait)
+- [ ] Codec unit tests from SparklingTones `test/fixtures/` + owner captures
+- [ ] Read-back verification after every live-state and slot write
+- [ ] Model profiles: Spark LIVE (Spark 2-style), Spark GO (Spark 40-style, from soundshed)

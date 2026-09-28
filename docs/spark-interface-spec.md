@@ -1,5 +1,7 @@
 # Spark Bluetooth Interface Specification
 
+> **Reference only — Spark 2.** This project targets the Spark GO and Spark LIVE, not the Spark 2 (see `docs/decisions/ADR-0002-target-amps.md`). General architecture ideas here still apply; byte-level details do not carry over without hardware evidence.
+
 This document describes the Bluetooth interface implemented by a Spark-like client for the Positive Grid Spark 2 amplifier. It is written as an implementation guide for a device controller, not as a product-facing app spec.
 
 ## 1) Interface purpose
