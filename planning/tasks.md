@@ -77,7 +77,7 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [x] Read presets and live sound (with retry for replies that stop at 13 chunks) — owner confirmed "it reads"
 - [x] Amp profile by BLE name: 4 slots, no levels/channels
 - [x] Preset switching on the GO (owner approved 2026-09-28) — needs owner hardware test
-- [ ] Knob change, block on/off, model change on the GO: snoop log of the official app doing them first
+- [x] Knob change, block on/off, model change on the GO: captured (same commands as the LIVE) and enabled — needs owner hardware test
 - [x] My tones: **Try** (temporary buffer) and **Save to amp…** (owner request 2026-09-29): picks a slot, reads the slot's current content into My tones as a backup first, writes with `storePreset`, confirms by read-back — Spark LIVE only; **first slot write from mySpark: needs owner hardware test**
 - [x] Spark GO uploads (Try / Save to amp / ToneCloud on the GO): captured from the official app (128-byte chunks, `0x7f` buffer, slot targets) and enabled — owner: "working" (2026-09-29)
 

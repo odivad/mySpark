@@ -30,14 +30,14 @@ export interface AmpProfile {
 /**
  * Spark LIVE: everything VERIFIED-HW. Spark GO ("Spark GO BLE", owner's GO 2026-09-28): answers
  * name/serial/current preset and reads slots 0–2; no answer to 0x0233 levels or 0x021a; one short
- * reply for slots 4–7 (it has 4 slots: SOURCED soundshed). View-only until its protocol is mapped.
+ * reply for slots 4–7 (it has 4 slots: SOURCED soundshed). Pedal edits, uploads, switching and tuner use the LIVE's commands with the block header (official app captures).
  */
 export function profileFor(deviceName: string | null): AmpProfile {
   if (deviceName === 'Spark LIVE BLE') {
     return { id: 'live', label: 'Spark LIVE', slotCount: LIVE_SLOT_COUNT, hasLevels: true, hasChannels: true, canWrite: true, canSwitch: true, hasTuner: true, canUpload: true };
   }
   if (deviceName === 'Spark GO BLE') {
-    return { id: 'go', label: 'Spark GO', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true, hasTuner: true, canUpload: true };
+    return { id: 'go', label: 'Spark GO', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: true, canSwitch: true, hasTuner: true, canUpload: true };
   }
   return { id: 'unknown', label: deviceName ?? 'Spark', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: false, hasTuner: false, canUpload: false };
 }

@@ -195,13 +195,14 @@ describe('send', () => {
     expect(outside).toMatchObject({ sent: false, verified: false, error: expect.stringMatching(/refused/) });
   });
 
-  it('lets the Spark GO switch presets but refuses its other writes', async () => {
+  it('lets the Spark GO switch presets, tune and edit pedals, but refuses levels and other writes', async () => {
     const { amp, t } = await connected(new FakeAmp({ name: 'Spark GO BLE' }));
     await t.send(commands.changePreset(2));
     await t.send(commands.setTuner(true));
-    await expect(t.send(commands.changeParam('Twin', 0, 0.5))).rejects.toThrow(/refused for Spark GO BLE/);
+    await t.send(commands.changeParam('Overdrive', 2, 0.5));
+    await expect(t.send(commands.setVolume(VOLUME.master, 0.5))).rejects.toThrow(/refused for Spark GO BLE/);
     await expect(t.send(commands.changePreset(SOFTWARE_PRESET, 0x01))).rejects.toThrow(/refused/);
-    expect(amp.received.map((m) => m.sub)).toEqual([0x38, 0x65]);
+    expect(amp.received.map((m) => m.sub)).toEqual([0x38, 0x65, 0x04]);
   });
 
   it('refuses write commands to an amp that is not a Spark LIVE, but allows reads', async () => {

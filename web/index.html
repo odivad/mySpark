@@ -40,6 +40,7 @@
       </div>
     </div>
     <div id="slots" class="slots"></div>
+    <button id="reload" class="side-action" disabled title="Read this channel's presets and live sound from the amp again">Reload CH1 from amp</button>
     <button id="backup" class="side-action" disabled>Back up all presets</button>
   </aside>
 
@@ -55,7 +56,7 @@
     <section id="tab-tone" class="tab" role="tabpanel">
       <div class="tab-head">
         <h2>Playing now <span id="live-name" class="sub"></span></h2>
-        <button id="save-current" disabled>Save to My tones</button>
+        <span><button id="revert" disabled title="Throw away unsaved changes: load the saved preset again">Revert to saved</button> <button id="save-current" disabled>Save to My tones</button></span>
       </div>
       <div id="amp" class="amp-slot"></div>
       <div id="live" class="chain"></div>
@@ -113,7 +114,7 @@
     </section>
 
     <section id="tab-log" class="tab" role="tabpanel" hidden>
-      <div class="tab-head"><h2>Log</h2></div>
+      <div class="tab-head"><h2>Log</h2><span><button id="log-copy">Copy</button> <button id="log-clear">Clear</button></span></div>
       <div id="log"></div>
     </section>
   </main>

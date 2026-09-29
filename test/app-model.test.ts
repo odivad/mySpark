@@ -72,9 +72,9 @@ describe('backup', () => {
 });
 
 describe('amp profiles', () => {
-  it('picks the profile from the BLE name: LIVE writable with 8 slots, GO view-only with 4', () => {
+  it('picks the profile from the BLE name: LIVE with 8 slots and levels, GO with 4 and none', () => {
     expect(profileFor('Spark LIVE BLE')).toMatchObject({ id: 'live', slotCount: 8, hasLevels: true, hasChannels: true, canWrite: true });
-    expect(profileFor('Spark GO BLE')).toMatchObject({ id: 'go', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true });
+    expect(profileFor('Spark GO BLE')).toMatchObject({ id: 'go', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: true, canSwitch: true });
     expect(profileFor('Something else')).toMatchObject({ id: 'unknown', canWrite: false });
   });
 });

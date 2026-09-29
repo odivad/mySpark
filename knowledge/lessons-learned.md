@@ -194,6 +194,14 @@ Bug report pulled with `adb bugreport` (`captures/raw/`, git-ignored). `VERIFIED
 - **Tuner works on the GO from mySpark** (owner, 2026-09-29: "tuner works"): the LIVE's `0x0165` on/off, sent with the GO's block header, confirmed by `0x0265` read-back. `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
 - Not seen yet: knob changes, uploads (the official app plays ToneCloud presets on the GO fine, but that session wasn't logged: the snoop log had silently stopped; only an empty `btsnooz_hci.log` remained), levels on the GO. The GO stays **view-only** in mySpark until those are captured or owner-approved to try.
 
+## 2026-09-29 — Spark GO pedal edits (official app, snoop log)
+
+`captures/raw/go7-btsnoop_hci.log`. `VERIFIED-HW (owner, Spark GO, official app traffic)`:
+- **Knob change `0x0104` [prefixed name, param, float, 0x00]**: same as the LIVE, trailing `0x00` included. No ACK. The app sends one about every 22 ms while a knob moves (79 during one drag).
+- **Block on/off `0x0115` [prefixed name, bool, 0x00]** → ACK `0x0415`.
+- **Model change `0x0106` [old name, new name, 0x00]** → ACK `0x0406` (Overdrive → JH.AxisFuzz). **Right after it, the app sends `0x0115` [new name, on]**, so mySpark does the same on the GO when the block was on.
+- So the Spark 2 "trailing 0x00" rule holds on the GO too. mySpark enables pedal editing on the GO with the block header; levels (`0x0133`), BPM and CH2 stay refused.
+
 ## 2026-09-29 — Spark GO preset upload (official app, snoop log)
 
 `captures/raw/go5-btsnoop_hci.log` (RFCOMM). `VERIFIED-HW (owner, Spark GO, official app traffic)`:

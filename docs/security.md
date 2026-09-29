@@ -51,7 +51,7 @@ Rules:
 
 ## 2d. Writes per amp
 
-- `writeAllowed` (`src/spark/transport.ts`) decides which write commands reach which amp: the **Spark LIVE** all; the **Spark GO** only the preset switch `0x0138 [0x00, n]` (owner approved 2026-09-28, after the official app's log showed it and the GO ACKing it) and the tuner on/off `0x0165` (owner asked 2026-09-29; the GO answers the tuner-state query, the on/off form is the LIVE's and is confirmed by read-back; owner confirmed it works), and whole-preset uploads `0x0101` whose target is the temporary buffer `0x7f` or slots 0–3, plus switching to `0x7f` (both seen from the official app on the GO, 2026-09-29); anything else none. Widening it for the GO needs captured evidence and owner approval.
+- `writeAllowed` (`src/spark/transport.ts`) decides which write commands reach which amp: the **Spark LIVE** all; the **Spark GO** only the preset switch `0x0138 [0x00, n]` (owner approved 2026-09-28, after the official app's log showed it and the GO ACKing it) and the tuner on/off `0x0165` (owner asked 2026-09-29; the GO answers the tuner-state query, the on/off form is the LIVE's and is confirmed by read-back; owner confirmed it works), and whole-preset uploads `0x0101` whose target is the temporary buffer `0x7f` or slots 0–3, plus switching to `0x7f` (both seen from the official app on the GO, 2026-09-29), and pedal edits `0x0104` / `0x0115` / `0x0106` with the trailing `0x00` (same forms as the LIVE, captured from the official app on the GO); anything else none (levels, BPM, CH2). Widening it for the GO needs captured evidence and owner approval.
 
 ## 2b. Model changes
 

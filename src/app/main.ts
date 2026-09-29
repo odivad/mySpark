@@ -290,28 +290,60 @@ async function connect(): Promise<void> {
     if (profile.hasChannels) await transport.readChannelPresets();
     renderLevels();
     renderSlots();
-    renderLevels();
-    slots = await transport.readLibrary(profile.slotCount, (i) => setMessage(`Reading ${slotLabel(i).label}…`));
-    renderSlots();
-    live = await transport.readLiveState();
-    liveIsSavedCopy = false;
-    if (!live && profile.id === 'go') {
-      // Spark GO: its live-state reply doesn't complete yet (under investigation). Show the saved
-      // version of the current preset instead, and say so.
-      const current = transport.state.currentPreset;
-      const saved = current !== null ? slots.find((x) => x.slot === current)?.preset : null;
-      if (saved) {
-        live = saved;
-        liveIsSavedCopy = true;
-      }
-    }
-    await rememberModels();
-    renderLive();
-    const ok = slots.filter((s) => s.preset).length;
-    const good = ok === profile.slotCount && live !== null;
-    const tail = profile.canWrite ? '' : profile.canUpload ? ` ${profile.label}: presets, Try, Save to amp and tuner; knob edits not yet.` : ` ${profile.label}: view only for now.`;
-    setMessage((good ? 'Ready.' : `Read ${ok} of ${profile.slotCount} presets${live ? '' : ', live sound unreadable'}.`) + tail, good ? 'ok' : 'warn');
+    await readCh1();
   });
+}
+
+/** Reads CH1's saved slots and live sound from the amp (on connect, and Reload from amp). */
+async function readCh1(): Promise<void> {
+  slots = await transport.readLibrary(profile.slotCount, (i) => setMessage(`Reading ${slotLabel(i).label}…`));
+  renderSlots();
+  live = await transport.readLiveState();
+  liveIsSavedCopy = false;
+  if (!live && profile.id === 'go') {
+    // Spark GO: its live-state reply doesn't complete yet (under investigation). Show the saved
+    // version of the current preset instead, and say so.
+    const current = transport.state.currentPreset;
+    const saved = current !== null ? slots.find((x) => x.slot === current)?.preset : null;
+    if (saved) {
+      live = saved;
+      liveIsSavedCopy = true;
+    }
+  }
+  await rememberModels();
+  renderLive();
+  const ok = slots.filter((s) => s.preset).length;
+  const good = ok === profile.slotCount && live !== null;
+  const tail = profile.canWrite ? '' : profile.canUpload ? ` ${profile.label}: presets, Try, Save to amp and tuner; knob edits not yet.` : ` ${profile.label}: view only for now.`;
+  setMessage((good ? 'Ready.' : `Read ${ok} of ${profile.slotCount} presets${live ? '' : ', live sound unreadable'}.`) + tail, good ? 'ok' : 'warn');
+}
+
+/** Re-reads the channel on show from the amp, without reconnecting (owner request 2026-09-29). */
+async function reloadChannel(): Promise<void> {
+  if (channel === 2) {
+    await readCh2();
+    return;
+  }
+  await userAction(async () => {
+    setMessage('Reading CH1 from the amp…');
+    await transport.identify();
+    renderInfo();
+    await readCh1();
+  });
+}
+
+/**
+ * Throws away unsaved edits: selects the current slot again, and switchPreset checks by read-back
+ * that the live sound now equals the saved slot (owner request 2026-09-29). Whether re-selecting
+ * the current preset reloads it on the amp is UNVERIFIED — the read-back says whether it did.
+ */
+async function revertToSaved(): Promise<void> {
+  const current = transport.state.currentPreset;
+  if (current === null) {
+    setMessage('No saved preset to go back to — pick one on the left.', 'warn');
+    return;
+  }
+  await switchTo(current);
 }
 
 async function switchTo(slot: number): Promise<void> {
@@ -1110,7 +1142,13 @@ function modelControl(block: number, current: string): HTMLElement {
 async function changeModel(block: number, from: string, to: string, untried: boolean): Promise<void> {
   await userAction(async () => {
     setMessage(`${blockName(block)}: switching to ${modelName(to)}…`);
-    const check = await transport.setEffectModel(block, from, to);
+    const wasOn = live?.effects[block]?.enabled ?? false;
+    let check = await transport.setEffectModel(block, from, to);
+    // The official app turns the new model on right after changing it on the GO (snoop log).
+    if (check.verified && profile.id === 'go' && wasOn && check.live?.effects[block]?.enabled === false) {
+      const on = await transport.setEffectEnabled(to, true);
+      check = { ...check, live: on.live ?? check.live };
+    }
     applyLive(check.live);
     if (!check.verified) {
       renderLive();
@@ -1141,6 +1179,10 @@ function renderControls(): void {
   $<HTMLButtonElement>('disconnect').hidden = !connected;
   $<HTMLButtonElement>('connect').disabled = document.body.dataset.connection === 'connecting';
   $<HTMLButtonElement>('backup').disabled = !connected || !idle || slots.every((s) => !s.preset);
+  const reload = $<HTMLButtonElement>('reload');
+  reload.disabled = !connected || !idle;
+  reload.textContent = `Reload CH${channel} from amp`;
+  $<HTMLButtonElement>('revert').disabled = !(connected && profile.canSwitch) || !idle || channel === 2 || transport.state.currentPreset === null;
   const canSwitch = connected && profile.canSwitch;
   $<HTMLButtonElement>('tuner-btn').disabled = !(connected && profile.hasTuner) || !idle;
   document.querySelectorAll<HTMLButtonElement>('#slots button').forEach((b) => (b.disabled = !canSwitch || !idle || channel === 2));
@@ -1461,6 +1503,8 @@ document.addEventListener('keydown', (e) => {
 });
 $('disconnect').addEventListener('click', () => transport.disconnect());
 $('backup').addEventListener('click', backup);
+$('reload').addEventListener('click', () => void reloadChannel());
+$('revert').addEventListener('click', () => void revertToSaved());
 $('save-current').addEventListener('click', () => {
   if (!live) return;
   const name = prompt('Name for this tone:', bufferName ?? live.name);
@@ -1474,6 +1518,14 @@ $('ai-form').addEventListener('submit', (e) => {
   void suggest();
 });
 $('export-tones').addEventListener('click', exportTones);
+$('log-copy').addEventListener('click', () => {
+  const text = [...$('log').children].map((line) => line.textContent ?? '').join('\n');
+  navigator.clipboard.writeText(text).then(
+    () => setMessage(`Log copied (${$('log').children.length} lines).`, 'ok'),
+    () => setMessage('Could not copy the log — select it and press Ctrl+C.', 'warn'),
+  );
+});
+$('log-clear').addEventListener('click', () => $('log').replaceChildren());
 $('tc-form').addEventListener('submit', (e) => {
   e.preventDefault();
   void cloudSearch();

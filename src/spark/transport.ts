@@ -130,6 +130,9 @@ export function writeAllowed(deviceName: string | null, command: SparkCommand): 
       return index !== 0 || (command.data[3] === 0x00 && target(command.data[4]));
     }
     if (command.sub === 0x65) return command.data.length === 1 && (command.data[0] === 0xc2 || command.data[0] === 0xc3);
+    // Knob change 0x0104, block on/off 0x0115, model change 0x0106: the official app sends the GO
+    // exactly the LIVE's forms, trailing 0x00 included (owner's GO, snoop log 2026-09-29).
+    if (command.sub === 0x04 || command.sub === 0x15 || command.sub === 0x06) return command.data.at(-1) === 0x00;
     return false;
   }
   return false;
