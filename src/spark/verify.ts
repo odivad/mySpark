@@ -10,7 +10,8 @@ import type { Preset } from './protocol.js';
  *
  * Floats travel as float32, so the expected value is rounded to float32 before comparing.
  * Not compared: `bank`/`number` (the target address, not content), `tail` (not sent — see
- * SparkTransport.writePreset) and the trailing checksum.
+ * SparkTransport.writePreset), the trailing checksum, and params the amp reports that weren't sent
+ * (it fills in params a preset leaves out). Every param that was sent must match.
  *
  * VERIFIED-HW (Spark LIVE, 2026-09-28): after loadPreset, live state (0x0201 [0x01, 0x00]) reports
  * metadata and chain exactly as written, so this full comparison passes. Not yet checked for a
@@ -57,9 +58,9 @@ export function presetDifferences(expected: Preset, actual: Preset): string[] {
       }
       if (p.index !== allowOneSided && f32(p.value) !== q.value) diffs.push(`${where} (${e.name}) param ${p.index}: expected ${p.value}, amp has ${q.value}`);
     }
-    for (const q of byIndex.values()) {
-      if (q.index !== allowOneSided) diffs.push(`${where} (${e.name}): amp has an extra param ${q.index}=${q.value}`);
-    }
+    // Params left in byIndex are ones the amp reports but we didn't send. Not a difference: the amp
+    // fills in params a preset leaves out (owner's amp, 2026-09-29: "Californication" sent Phaser
+    // #0–1, the amp reported #2=0 and #3=0; ToneCloud presets store Phaser with all four).
   });
   return diffs;
 }

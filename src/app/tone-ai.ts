@@ -82,6 +82,30 @@ export function paletteModels(palette: ModelPalette): Set<string> {
   return new Set(palette.flat().map((e) => e.name));
 }
 
+/**
+ * Before an upload: drops params the amp didn't report for that model the last time it was read
+ * (same chain position first, then any). Params the amp reported but the preset leaves out stay
+ * left out: the amp fills them in itself (Phaser, "Californication"). A model never read from this
+ * amp goes as it is. Returns the preset to send and what was dropped, for the log.
+ *
+ * Why (owner, Spark LIVE, 2026-09-29): "Crunchy Chorus" sent `JH.Vox846` with #0–5; the LIVE reports
+ * #0–4 for that model, and after the upload it kept only #0–2. That the extra param caused the loss
+ * is UNVERIFIED — the read-back after the next upload says whether this helps.
+ */
+export function alignToAmp(preset: Preset, palette: ModelPalette): { preset: Preset; dropped: string[] } {
+  const dropped: string[] = [];
+  const effects = preset.effects.map((effect, i) => {
+    const ref = palette[i]?.find((e) => e.name === effect.name) ?? palette.flat().find((e) => e.name === effect.name);
+    if (!ref) return effect;
+    const reported = new Set(ref.params.map((p) => p.index));
+    const extra = effect.params.filter((p) => !reported.has(p.index));
+    if (!extra.length) return effect;
+    dropped.push(`block ${i + 1} (${effect.name}) param ${extra.map((p) => p.index).join(', ')}`);
+    return { ...effect, params: effect.params.filter((p) => reported.has(p.index)) };
+  });
+  return { preset: dropped.length ? { ...preset, effects } : preset, dropped };
+}
+
 /** Keeps a string to printable ASCII: the preset encoder writes one byte per character. */
 export function toAscii(s: string, max: number): string {
   return s

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   POSITION_KEYS,
+  alignToAmp,
   buildPalette,
   buildPrompt,
   checkSuggestion,
@@ -203,5 +204,29 @@ describe('catalogue names', () => {
       expect(MODEL_INFO[id]?.name, id).toBeTruthy();
       expect(MODEL_INFO[id]?.knobs.length, id).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('alignToAmp', () => {
+  it('drops params the amp did not report for that model ("Crunchy Chorus": JH.Vox846 #5)', () => {
+    const base = preset0();
+    const amp = copy(base);
+    amp.effects[1] = { name: 'JH.Vox846', enabled: true, params: [0, 1, 2, 3, 4].map((index) => ({ index, value: 0.5 })) };
+    const tone = copy(amp);
+    tone.effects[1].params.push({ index: 5, value: 0 });
+    const r = alignToAmp(tone, buildPalette([amp]));
+    expect(r.preset.effects[1].params.map((p) => p.index)).toEqual([0, 1, 2, 3, 4]);
+    expect(r.dropped).toEqual(['block 2 (JH.Vox846) param 5']);
+    expect(tone.effects[1].params).toHaveLength(6); // input untouched
+  });
+
+  it('leaves out-of-palette models, and params the tone leaves out, as they are', () => {
+    const base = preset0();
+    const tone = copy(base);
+    tone.effects[4].params = tone.effects[4].params.slice(0, 1);
+    const r = alignToAmp(tone, buildPalette([base]));
+    expect(r.dropped).toEqual([]);
+    expect(r.preset).toBe(tone);
+    expect(alignToAmp(base, buildPalette([])).preset).toBe(base);
   });
 });

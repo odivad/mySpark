@@ -521,9 +521,20 @@ describe('presetDifferences', () => {
     const gs = gateSlot.effects[0].params.find((p) => p.index === 2) ?? (gateSlot.effects[0].params.push({ index: 2, value: 0 }), gateSlot.effects[0].params[2]);
     gs.value = 0;
     expect(presetDifferences(gateSlot, gateLive)).toEqual([]);
-    // Any other extra or missing param is still a difference.
-    live.effects[4].params.push({ index: 9, value: 0.5 });
-    expect(presetDifferences(slot, live)).toEqual([expect.stringMatching(/extra param 9/)]);
+    // Any other missing param is still a difference.
+    live.effects[4].params = live.effects[4].params.filter((p) => p.index !== 0);
+    expect(presetDifferences(slot, live)).toEqual([expect.stringMatching(/^block 5 .*param 0: .*amp has none/)]);
+  });
+
+  it('accepts params the amp adds that were not sent ("Californication": Phaser #2, #3 = 0)', () => {
+    const sent = copy(preset());
+    const amp = copy(preset());
+    const top = Math.max(...amp.effects[4].params.map((p) => p.index));
+    amp.effects[4].params.push({ index: top + 1, value: 0 }, { index: top + 2, value: 0 });
+    expect(presetDifferences(sent, amp)).toEqual([]);
+    // A sent param with a different value still fails.
+    amp.effects[4].params[0].value = amp.effects[4].params[0].value + 0.25;
+    expect(presetDifferences(sent, amp)).toHaveLength(1);
   });
 
   it('names the block, model and param that differ', () => {
