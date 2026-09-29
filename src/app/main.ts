@@ -3,7 +3,7 @@
  * backup. Plain DOM (ADR-0005). The amp is the source of truth: what's shown is a projection of
  * what the amp reported, and every change is confirmed by reading the amp back.
  */
-import { BANK, CHAIN_CH2, CMD_NOTIFY, Reader, SOFTWARE_PRESET, VOLUME, type VolumeName, type Preset, type SparkMessage, slotLabel, validatePreset } from '../spark/protocol.js';
+import { BANK, CHAIN_CH2, CMD_NOTIFY, NOTE_NAMES, Reader, SOFTWARE_PRESET, VOLUME, type VolumeName, parseTunerReading, tunerCents, type Preset, type SparkMessage, slotLabel, validatePreset } from '../spark/protocol.js';
 import { SparkTransport, type SlotRead } from '../spark/transport.js';
 import {
   AMP_BLOCK,
@@ -19,7 +19,7 @@ import { aiAvailability, generate, warmUp } from './browser-ai.js';
 import { startDevReload } from './dev-reload.js';
 import { type CloudOrder, type CloudSummary, fetchPreset, searchPresets, sortResults } from './tonecloud.js';
 import { type CheckedSuggestion, type Instrument, type ModelPalette, buildPalette, buildPrompt, checkSuggestion, mergePalettes, paletteModels, parseAnswer, suggestionSchema } from './tone-ai.js';
-import { SPARK2_MODELS, describeModel, knobName, modelName } from '../spark/catalog.js';
+import { MODEL_INFO, SPARK2_MODELS, describeModel, knobName, modelName } from '../spark/catalog.js';
 import { type SavedTone, addKnownBlocks, deleteTone, getKnownBlocks, getSeenModels, listTones, saveTone } from './tone-db.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
@@ -27,6 +27,13 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   if (!el) throw new Error(`#${id} missing`);
   return el as T;
 };
+
+/** Fills a range slider's track up to its value (CSS reads --val). */
+function paintRange(input: HTMLInputElement): void {
+  const min = Number(input.min || 0);
+  const max = Number(input.max || 1);
+  input.style.setProperty('--val', `${((Number(input.value) - min) / (max - min || 1)) * 100}%`);
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -51,6 +58,8 @@ let blocking = 0;
 let refreshQueued = false;
 /** Name of what's in the temporary buffer, when the amp is playing it. */
 let bufferName: string | null = null;
+/** Which card is playing in the temporary buffer: "ai:<n>", "cloud:<id>" or "tone:<id>". */
+let playingKey: string | null = null;
 let suggestions: CheckedSuggestion[] = [];
 let lastRequest = '';
 let tones: SavedTone[] = [];
@@ -78,10 +87,13 @@ interface ParamView {
   value: HTMLElement;
   fill: HTMLElement | null;
   status: HTMLElement;
+  /** For params that pick between positions (e.g. reverb type): a dropdown instead of a slider. */
+  choice?: HTMLSelectElement;
 }
 interface BlockView {
   root: HTMLElement;
   toggle: HTMLButtonElement;
+  label: HTMLElement;
 }
 const paramViews = new Map<string, ParamView>();
 let blockViews: BlockView[] = [];
@@ -105,15 +117,51 @@ function log(line: string): void {
   out.scrollTop = out.scrollHeight;
 }
 
+/* Messages appear as toasts at the bottom right, so a confirmation is visible wherever you are.
+   Progress ("Reading A2…") reuses one info toast instead of stacking up. */
+const TOAST_MS = { info: 3500, ok: 4500, warn: 9000 } as const;
+let progressToast: HTMLElement | null = null;
+
+function toast(content: Array<Node | string>, kind: 'info' | 'ok' | 'warn', sticky = false): HTMLElement {
+  const box = $('toasts');
+  const close = el('button', { class: 'toast-close', 'aria-label': 'Dismiss' }, '×');
+  const t = el('div', { class: 'toast', 'data-kind': kind, role: kind === 'warn' ? 'alert' : 'status' }, el('div', { class: 'toast-text' }, ...content), close);
+  let timer: number | undefined;
+  const remove = () => {
+    window.clearTimeout(timer);
+    t.remove();
+    if (progressToast === t) progressToast = null;
+  };
+  const arm = () => {
+    window.clearTimeout(timer);
+    if (!sticky) timer = window.setTimeout(remove, TOAST_MS[kind]);
+  };
+  close.addEventListener('click', remove);
+  (t as HTMLElement & { rearm?: () => void }).rearm = arm;
+  arm();
+  box.append(t);
+  while (box.children.length > 4) box.firstElementChild?.remove();
+  return t;
+}
+
 function setMessage(text: string, kind: 'info' | 'ok' | 'warn' = 'info'): void {
-  const m = $('message');
-  m.textContent = text;
-  m.dataset.kind = kind;
+  if (kind === 'info' && progressToast?.isConnected) {
+    progressToast.querySelector('.toast-text')!.textContent = text;
+    (progressToast as HTMLElement & { rearm?: () => void }).rearm?.();
+    return;
+  }
+  if (kind !== 'info' && progressToast?.isConnected) progressToast.remove();
+  const t = toast([text], kind);
+  progressToast = kind === 'info' ? t : null;
 }
 
 const transport = new SparkTransport({
   onStatus: (status, detail) => {
     document.body.dataset.connection = status;
+    if (status === 'disconnected' && tunerOpen) {
+      tunerOpen = false;
+      $('tuner').hidden = true;
+    }
     $('status').textContent = status === 'disconnected' ? 'Not connected' : detail;
     renderControls();
   },
@@ -168,8 +216,12 @@ function handleAmpMessage(m: SparkMessage): void {
       return;
     }
     bufferName = null;
+    playingKey = null;
+    renderCardLists();
     renderSlots();
     void refreshLive();
+  } else if (m.sub === 0x64) {
+    showTunerReading(m.data);
   } else if (m.sub === 0x37) {
     applyAmpKnob(m.data);
   } else if (m.sub === 0x33 && m.data.length === 6) {
@@ -245,6 +297,8 @@ async function switchTo(slot: number): Promise<void> {
     setMessage(`Switching to ${slotLabel(slot).label}…`);
     const r = await transport.switchPreset(slot, LIVE_SLOT_COUNT);
     bufferName = null;
+    playingKey = null;
+    renderCardLists();
     if (r.slotPreset) slots = slots.map((s) => (s.slot === slot ? { slot, preset: r.slotPreset } : s));
     live = r.live;
     renderSlots();
@@ -368,14 +422,15 @@ async function rememberModels(): Promise<void> {
 }
 
 /** Plays a preset from the temporary buffer (verified). No saved slot changes. */
-async function playInBuffer(preset: Preset, label: string): Promise<void> {
+async function playInBuffer(preset: Preset, label: string, key: string | null = null): Promise<void> {
   await userAction(async () => {
     setMessage(`Loading "${label}" into the temporary buffer…`);
     const r = await transport.loadPreset(preset, (i, n) => setMessage(`Loading "${label}" — ${i + 1}/${n}…`));
     bufferName = label;
+    playingKey = r.sent ? key : playingKey;
     if (r.readBack) applyLive(r.readBack);
     renderSlots();
-    renderTones();
+    renderCardLists();
     $('live-name').textContent = liveLabel();
     if (r.verified) setMessage(`"${label}" playing (temporary) — confirmed by the amp. Press PRESET on the amp to go back.`, 'ok');
     else setMessage(`"${label}" not confirmed: ${r.differences.slice(0, 3).join('; ') || r.error || 'no read-back'}`, 'warn');
@@ -417,6 +472,7 @@ async function suggest(): Promise<void> {
     });
     log(`AI answer: ${text.slice(0, 400)}${text.length > 400 ? '…' : ''}`);
     suggestions = parseAnswer(text).suggestions.map((raw) => checkSuggestion(raw, playback, pal));
+    if (playingKey?.startsWith('ai:')) playingKey = null;
     lastRequest = request;
     renderSuggestions();
     const good = suggestions.filter((s) => s.preset).length;
@@ -463,7 +519,7 @@ async function applySaved(tone: SavedTone): Promise<void> {
     setMessage(`Not applied — "${tone.name}": ${errors.slice(0, 2).join('; ')}`, 'warn');
     return;
   }
-  await playInBuffer(tone.preset, tone.name);
+  await playInBuffer(tone.preset, tone.name, `tone:${tone.id}`);
 }
 
 function exportTones(): void {
@@ -474,10 +530,24 @@ function exportTones(): void {
   URL.revokeObjectURL(a.href);
 }
 
+/** True when this card's tone is what the amp is playing from the temporary buffer. */
+function isPlaying(key: string): boolean {
+  return playingKey === key && transport.state.currentPreset === SOFTWARE_PRESET;
+}
+
+/** Re-draws the three card lists so the "Playing" highlight follows what the amp plays. */
+function renderCardLists(): void {
+  renderSuggestions();
+  renderTones();
+  if (cloudResults.length) renderCloud();
+}
+
 function card(title: string, desc: string, meta: string, extra: Node[], actions: HTMLButtonElement[], cls = ''): HTMLElement {
+  const playing = cls.split(' ').includes('playing');
   return el(
     'div',
-    { class: `card ${cls}`.trim() },
+    { class: `card ${cls}`.trim(), ...(playing ? { 'aria-current': 'true' } : {}) },
+    ...(playing ? [el('span', { class: 'badge' }, '▶ Playing')] : []),
     el('h3', {}, title),
     ...(desc ? [el('div', { class: 'desc' }, desc)] : []),
     ...(meta ? [el('div', { class: 'meta' }, meta)] : []),
@@ -495,16 +565,24 @@ function button(label: string, onClick: () => void, needsAmp = false): HTMLButto
 function renderSuggestions(): void {
   const out = $('ai-results');
   out.replaceChildren(
-    ...suggestions.map((s) => {
+    ...suggestions.map((s, i) => {
       if (!s.preset) {
         const errs = el('ul', { class: 'errors' }, ...s.errors.slice(0, 4).map((e) => el('li', {}, e)));
         return card(s.name, s.description, 'Rejected — not safe to send', [errs], [], 'rejected');
       }
       const preset = s.preset;
-      return card(s.name, s.description, s.summary.join(' · '), [], [
-        button('Try', () => void playInBuffer(preset, s.name), true),
-        button('Save', () => void storeTone({ name: s.name, description: s.description, source: 'ai', request: lastRequest, preset })),
-      ]);
+      const key = `ai:${i}`;
+      return card(
+        s.name,
+        s.description,
+        s.summary.join(' · '),
+        [],
+        [
+          button('Try', () => void playInBuffer(preset, s.name, key), true),
+          button('Save', () => void storeTone({ name: s.name, description: s.description, source: 'ai', request: lastRequest, preset })),
+        ],
+        isPlaying(key) ? 'playing' : '',
+      );
     }),
   );
   renderControls();
@@ -529,7 +607,7 @@ function renderTones(): void {
               void deleteTone(t.id).then(refreshTones);
             }),
           ],
-          bufferName === t.name && transport.state.currentPreset === SOFTWARE_PRESET ? 'playing' : '',
+          isPlaying(`tone:${t.id}`) ? 'playing' : '',
         ),
       ),
     );
@@ -628,17 +706,80 @@ function renderCloud(): void {
       const chain = s.models.length ? s.models.map((m) => modelName(m)).join(' → ') : 'chain shown after first Try or Save';
       const tryBtn = button('Try', async () => {
         const preset = await cloudPreset(s);
-        if (preset) await playInBuffer(preset, s.name);
+        if (preset) await playInBuffer(preset, s.name, `cloud:${s.id}`);
       }, true);
       tryBtn.setAttribute('data-ch1-only', '');
       const save = button('Save', async () => {
         const preset = await cloudPreset(s);
         if (preset) await storeTone({ name: s.name, description: s.description, source: 'tonecloud', preset });
       });
-      return card(s.name, s.description, meta, [el('div', { class: 'meta chain-line' }, chain)], [tryBtn, save]);
+      return card(s.name, s.description, meta, [el('div', { class: 'meta chain-line' }, chain)], [tryBtn, save], isPlaying(`cloud:${s.id}`) ? 'playing' : '');
     }),
   );
   renderControls();
+}
+
+/* ---------------------------------------------------------------- tuner
+   The amp's built-in tuner: 0x0165 on/off (confirmed by reading 0x0265 back), readings 0x0364. */
+
+let tunerOpen = false;
+let tunerSmooth: number | null = null;
+let tunerSilence: number | undefined;
+
+async function openTuner(): Promise<void> {
+  if (tunerOpen) return;
+  await userAction(async () => {
+    const ok = await transport.setTuner(true);
+    if (!ok) {
+      setMessage('The amp did not confirm the tuner is on.', 'warn');
+      return;
+    }
+    tunerOpen = true;
+    tunerSmooth = null;
+    $('tuner').hidden = false;
+    $('tuner').dataset.state = '';
+    $('tuner-note').textContent = '–';
+    $('tuner-cents').textContent = 'Play a string';
+    $<HTMLButtonElement>('tuner-close').focus();
+  });
+}
+
+async function closeTuner(): Promise<void> {
+  if (!tunerOpen) return;
+  tunerOpen = false;
+  $('tuner').hidden = true;
+  window.clearTimeout(tunerSilence);
+  if (!transport.connected) return;
+  try {
+    const ok = await withAmp(() => transport.setTuner(false));
+    if (!ok) setMessage('The amp did not confirm the tuner is off — it may still be muted. Try Tuner → Close again.', 'warn');
+  } catch (err) {
+    setMessage(`Tuner off failed: ${(err as Error).message}`, 'warn');
+  }
+}
+
+function showTunerReading(data: readonly number[]): void {
+  if (!tunerOpen) return;
+  const reading = parseTunerReading(data);
+  window.clearTimeout(tunerSilence);
+  if (!reading) {
+    // No signal: fade back after a moment instead of flickering between notes.
+    tunerSilence = window.setTimeout(() => {
+      tunerSmooth = null;
+      $('tuner').dataset.state = '';
+      $('tuner-cents').textContent = 'Play a string';
+      $('tuner-needle').style.left = '50%';
+    }, 600);
+    return;
+  }
+  // Light smoothing: the amp reports every ~60 ms and the value jitters while a note rings.
+  tunerSmooth = tunerSmooth === null ? reading.value : tunerSmooth * 0.6 + reading.value * 0.4;
+  const cents = tunerCents(tunerSmooth);
+  const abs = Math.abs(cents);
+  $('tuner').dataset.state = abs <= 3 ? 'in' : abs <= 15 ? 'near' : 'off';
+  $('tuner-note').textContent = NOTE_NAMES[reading.note] ?? '?';
+  $('tuner-cents').textContent = abs <= 3 ? 'In tune' : `${cents > 0 ? '+' : '−'}${abs} cents ${cents > 0 ? 'sharp' : 'flat'}`;
+  $('tuner-needle').style.left = `${Math.min(98, Math.max(2, tunerSmooth * 100))}%`;
 }
 
 /* ---------------------------------------------------------------- channels
@@ -685,12 +826,15 @@ async function refreshCh2Live(): Promise<void> {
   }
 }
 
-function renderCh2Live(out: HTMLElement): void {
-  $('live-name').textContent = ch2Live ? `${ch2Live.name} · CH2 (view only)` : '';
+function renderCh2Live(out: HTMLElement, ampBox: HTMLElement): void {
+  $('live-name').textContent = ch2Live ? `${ch2Live.name} · CH2, view only` : '';
   if (!ch2Live) {
     out.append(el('p', { class: 'empty' }, transport.connected ? 'Reading CH2…' : 'Connect to see CH2.'));
     return;
   }
+  // CH2's chain: comp/drive → preamp → EQ/mod → reverb. The preamp plays the amp's role: shown above.
+  const pedalPos = [1, -1, 4, 6];
+  const pedals: HTMLElement[] = [];
   ch2Live.effects.forEach((effect, block) => {
     const params = el('div', { class: 'params' });
     for (const p of effect.params) {
@@ -705,20 +849,31 @@ function renderCh2Live(out: HTMLElement): void {
         ),
       );
     }
-    out.append(
-      el(
-        'section',
-        { class: `block${effect.enabled ? '' : ' off'}` },
-        el(
-          'header',
-          {},
-          el('span', { class: 'block-name' }, CHAIN_CH2[block] ?? `Block ${block + 1}`),
-          el('span', { class: 'pill' }, effect.enabled ? 'on' : 'off'),
-        ),
-        el('div', { class: 'model', title: effect.name }, describeModel(effect.name)),
-        params,
-      ),
+    const sw = el(
+      'span',
+      { class: 'switch static', 'aria-pressed': String(effect.enabled) },
+      el('span', { class: 'led' }),
+      el('span', {}, effect.enabled ? 'on' : 'off'),
     );
+    const isPreamp = block === 1;
+    const root = el(
+      'section',
+      { class: isPreamp ? `amp-panel${effect.enabled ? '' : ' off'}` : `block pedal pos-${pedalPos[block] ?? 0}${effect.enabled ? '' : ' off'}` },
+      el(
+        'header',
+        {},
+        el('span', { class: 'block-name' }, CHAIN_CH2[block] ?? `Block ${block + 1}`),
+        ...(isPreamp ? [el('div', { class: 'model', title: effect.name }, describeModel(effect.name)), sw] : []),
+      ),
+      ...(isPreamp ? [params] : [el('div', { class: 'model', title: effect.name }, describeModel(effect.name)), params, el('div', { class: 'footswitch' }, sw)]),
+    );
+    if (isPreamp) ampBox.append(root);
+    else pedals.push(root);
+  });
+  pedals.forEach((pedal, i) => {
+    if (i > 0) out.append(el('span', { class: 'cable', 'aria-hidden': 'true' }));
+    if (i === 1) out.append(el('span', { class: 'amp-tap', title: 'The preamp (above) sits here in the chain' }, 'PRE', '↑'), el('span', { class: 'cable', 'aria-hidden': 'true' }));
+    out.append(pedal);
   });
 }
 
@@ -748,6 +903,7 @@ function renderLevels(): void {
     const v = transport.state.volumes[target];
     const input = el('input', { type: 'range', min: '0', max: '1', step: '0.01', 'aria-label': `${LEVEL_LABELS[name]} volume`, 'data-needs-amp': '' });
     input.value = String(v ?? 0);
+    paintRange(input);
     const value = el('span', { class: 'param-value' }, v === undefined ? '—' : percent(v));
     const status = el('span', { class: 'param-status', 'aria-live': 'polite' });
     const view: LevelView = { input, value, status, latest: v ?? 0, dirty: false, sending: false, dragging: false, timer: undefined };
@@ -818,6 +974,7 @@ function updateLevel(target: number): void {
   if (!view || v === undefined || view.dragging) return;
   view.latest = v;
   view.input.value = String(v);
+  paintRange(view.input);
   view.value.textContent = percent(v);
 }
 
@@ -918,8 +1075,9 @@ function renderSlots(): void {
             'aria-pressed': String(transport.state.ch2Preset === slot),
             title: 'Switching CH2 presets from the app is not known yet: use the back PRESET knob',
           },
+          el('span', { class: 'led', 'aria-hidden': 'true' }),
           el('span', { class: 'slot-label' }, label),
-          el('span', { class: 'slot-name' }, preset ? preset.name : ch2Slots.length ? 'unreadable' : '—'),
+          el('span', { class: 'slot-name', title: preset?.name ?? '' }, preset ? preset.name : ch2Slots.length ? 'unreadable' : '—'),
         ),
       );
     }
@@ -932,8 +1090,9 @@ function renderSlots(): void {
     const button = el(
       'button',
       { class: `slot bank-${bank}`, 'aria-pressed': String(transport.state.currentPreset === slot) },
+      el('span', { class: 'led', 'aria-hidden': 'true' }),
       el('span', { class: 'slot-label' }, label),
-      el('span', { class: 'slot-name' }, preset ? preset.name : slots.length ? 'unreadable' : '—'),
+      el('span', { class: 'slot-name', title: preset?.name ?? '' }, preset ? preset.name : slots.length ? 'unreadable' : '—'),
     );
     button.addEventListener('click', () => void switchTo(slot));
     list.append(button);
@@ -987,7 +1146,7 @@ function updateBlockView(block: number): void {
   const effect = live?.effects[block];
   if (!view || !effect) return;
   view.root.classList.toggle('off', !effect.enabled);
-  view.toggle.textContent = effect.enabled ? 'on' : 'off';
+  view.label.textContent = effect.enabled ? 'on' : 'off';
   view.toggle.setAttribute('aria-pressed', String(effect.enabled));
 }
 
@@ -996,7 +1155,15 @@ function updateParamView(block: number, index: number, fromAmp: boolean, status?
   const param = live?.effects[block]?.params.find((p) => p.index === index);
   if (!view || !param) return;
   const edit = edits.get(keyOf(block, index));
-  if (view.input && !edit?.dragging) view.input.value = String(param.value);
+  if (view.input && !edit?.dragging) {
+    view.input.value = String(param.value);
+    paintRange(view.input);
+  }
+  if (view.choice && !edit?.dragging) {
+    const vals = MODEL_INFO[live?.effects[block]?.name ?? '']?.choiceValues?.[index];
+    const i = vals ? vals.findIndex((v) => Math.abs(v - param.value) <= 0.02) : Math.round(param.value * 10);
+    if (i >= 0) view.choice.value = String(i);
+  }
   view.value.textContent = formatValue(param.value);
   if (view.fill) view.fill.style.width = `${Math.round(param.value * 100)}%`;
   if (status) {
@@ -1011,13 +1178,15 @@ function updateParamView(block: number, index: number, fromAmp: boolean, status?
 
 function renderLive(): void {
   const out = $('live');
+  const ampBox = $('amp');
   out.replaceChildren();
+  ampBox.replaceChildren();
   paramViews.clear();
   blockViews = [];
   edits.forEach((e) => window.clearTimeout(e.verifyTimer));
   edits.clear();
   if (channel === 2) {
-    renderCh2Live(out);
+    renderCh2Live(out, ampBox);
     renderControls();
     return;
   }
@@ -1028,14 +1197,45 @@ function renderLive(): void {
   }
   live.effects.forEach((effect, block) => {
     const params = el('div', { class: 'params' });
+    // Selector params (reverb type) go at the top of the pedal, where the model dropdown sits.
+    const top = el('div', { class: 'params pedal-top' });
+    const known = MODEL_INFO[effect.name]?.knobs.length ?? 0;
     for (const p of effect.params) {
-      const editable = isEditableParam(block, p.index);
+      // Params past the named knobs aren't shown: on Noise Gate and Reverb that extra param is the
+      // block's on/off (the footswitch), and the official app doesn't show it either (owner, 2026-09-28).
+      if (known && p.index >= known && block !== AMP_BLOCK) continue;
+      const editable = isEditableParam(block, p.index, effect.name);
       const value = el('span', { class: 'param-value' }, formatValue(p.value));
       const status = el('span', { class: 'param-status', 'aria-live': 'polite' });
       let input: HTMLInputElement | null = null;
       let fill: HTMLElement | null = null;
+      let choice: HTMLSelectElement | undefined;
       let control: HTMLElement;
-      if (editable) {
+      const positions = MODEL_INFO[effect.name]?.choices?.[p.index];
+      const values = MODEL_INFO[effect.name]?.choiceValues?.[p.index] ?? positions?.map((_, i) => i / 10);
+      if (positions && values) {
+        // Reverb type: positions stored as 0, 0.1 … 0.8 (SparklingTones); order confirmed against the
+        // official app (owner screenshots 2026-09-28). BPM switches: 0 / 1.
+        const nearest = values.reduce((best, v, i) => (Math.abs(v - p.value) < Math.abs(values[best] - p.value) ? i : best), 0);
+        const current = Math.abs(values[nearest] - p.value) <= 0.02 ? nearest : -1;
+        choice = el(
+          'select',
+          { class: 'choice-select', 'aria-label': `${blockName(block)} ${paramName(block, p.index, effect.name)}`, 'data-needs-amp': '' },
+          ...positions.map((name, i) => {
+            const o = el('option', { value: String(i) }, name);
+            if (i === current) o.selected = true;
+            return o;
+          }),
+        );
+        if (current < 0) choice.prepend(el('option', { value: '', selected: '' }, `(value ${formatValue(p.value)})`));
+        const sel = choice;
+        sel.addEventListener('change', () => {
+          if (sel.value === '') return;
+          onSliderInput(block, p.index, values[Number(sel.value)]);
+          onSliderRelease(block, p.index);
+        });
+        control = sel;
+      } else if (editable) {
         const slider = el('input', {
           type: 'range',
           min: '0',
@@ -1044,6 +1244,7 @@ function renderLive(): void {
           'aria-label': `${blockName(block)} ${paramName(block, p.index, effect.name)}`,
         });
         slider.value = String(p.value);
+        paintRange(slider);
         slider.addEventListener('input', () => onSliderInput(block, p.index, Number(slider.value)));
         slider.addEventListener('change', () => onSliderRelease(block, p.index));
         input = slider;
@@ -1052,39 +1253,97 @@ function renderLive(): void {
         fill = el('span', { class: 'fill', style: `width:${Math.round(p.value * 100)}%` });
         control = el('span', { class: 'bar' }, fill);
       }
-      paramViews.set(keyOf(block, p.index), { block, index: p.index, input, value, fill, status });
-      const row = el(
-        'div',
-        { class: `param${editable ? ' editable' : ''}` },
-        el('span', { class: 'param-name' }, paramName(block, p.index, effect.name)),
-        control,
-        value,
-        status,
+      paramViews.set(keyOf(block, p.index), { block, index: p.index, input, value, fill, status, choice });
+      if (choice) value.textContent = '';
+      (choice ? top : params).append(
+        el(
+          'div',
+          { class: `param${editable ? ' editable' : ''}${choice ? ' choice' : ''}` },
+          el('span', { class: 'param-name' }, paramName(block, p.index, effect.name)),
+          control,
+          value,
+          status,
+        ),
       );
-      params.append(row);
     }
+    const label = el('span', {}, effect.enabled ? 'on' : 'off');
     const toggle = el(
       'button',
-      { class: 'pill', 'aria-pressed': String(effect.enabled), title: `Turn ${blockName(block)} on or off` },
-      effect.enabled ? 'on' : 'off',
+      { class: 'switch', 'aria-pressed': String(effect.enabled), title: `Turn ${blockName(block)} on or off` },
+      el('span', { class: 'led', 'aria-hidden': 'true' }),
+      label,
     );
     toggle.addEventListener('click', () => void toggleBlock(block));
+    const isAmp = block === AMP_BLOCK;
     const root = el(
       'section',
-      { class: `block${effect.enabled ? '' : ' off'}${block === AMP_BLOCK ? ' amp' : ''}` },
-      el('header', {}, el('span', { class: 'block-name' }, blockName(block)), toggle),
-      modelControl(block, effect.name),
-      params,
+      { class: isAmp ? `block amp-panel${effect.enabled ? '' : ' off'}` : `block pedal pos-${block}${effect.enabled ? '' : ' off'}` },
+      // Amp: name, model and switch in the header. Pedals: name on top, footswitch at the bottom.
+      el('header', {}, el('span', { class: 'block-name' }, blockName(block)), ...(isAmp ? [modelControl(block, effect.name), toggle] : [])),
+      ...(isAmp
+        ? [params]
+        : [
+            // A single-model block with a selector (Reverb) shows the selector instead of the model line.
+            ...(top.childElementCount && (SPARK2_MODELS[block]?.length ?? 0) <= 1 ? [] : [modelControl(block, effect.name)]),
+            ...(top.childElementCount ? [top] : []),
+            params,
+            el('div', { class: 'footswitch' }, toggle),
+          ]),
     );
-    blockViews.push({ root, toggle });
+    blockViews.push({ root, toggle, label });
+    if (isAmp) {
+      ampBox.append(root);
+      return;
+    }
+    // Pedals in signal order, joined by cables; a tap marks where the amp (shown above) sits.
+    if (out.childElementCount) out.append(el('span', { class: 'cable', 'aria-hidden': 'true' }));
+    if (block === AMP_BLOCK + 1) {
+      out.append(el('span', { class: 'amp-tap', title: 'The amp (above) sits here in the chain' }, 'AMP', '↑'));
+      out.append(el('span', { class: 'cable', 'aria-hidden': 'true' }));
+    }
     out.append(root);
   });
   renderControls();
 }
 
+/* ---------------------------------------------------------------- tabs */
+
+const TABS = ['tone', 'ai', 'cloud', 'tones', 'log'] as const;
+type Tab = (typeof TABS)[number];
+
+function showTab(tab: Tab): void {
+  for (const t of TABS) {
+    $(`tab-${t}`).hidden = t !== tab;
+    document.querySelector(`.tabs [data-tab="${t}"]`)?.setAttribute('aria-selected', String(t === tab));
+  }
+  try {
+    localStorage.setItem('myspark.tab', tab);
+  } catch {
+    // storage unavailable: the tab just isn't remembered
+  }
+}
+
 /* ---------------------------------------------------------------- start */
 
+document.addEventListener('input', (e) => {
+  if (e.target instanceof HTMLInputElement && e.target.type === 'range') paintRange(e.target);
+});
+
+document.querySelectorAll<HTMLButtonElement>('.tabs [data-tab]').forEach((b) =>
+  b.addEventListener('click', () => showTab(b.dataset.tab as Tab)),
+);
+try {
+  const saved = localStorage.getItem('myspark.tab') as Tab | null;
+  if (saved && (TABS as readonly string[]).includes(saved)) showTab(saved);
+} catch {
+  // no storage: start on Tone
+}
 $('connect').addEventListener('click', () => void connect());
+$('tuner-btn').addEventListener('click', () => void openTuner());
+$('tuner-close').addEventListener('click', () => void closeTuner());
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && tunerOpen) void closeTuner();
+});
 $('disconnect').addEventListener('click', () => transport.disconnect());
 $('backup').addEventListener('click', backup);
 $('save-current').addEventListener('click', () => {
@@ -1123,12 +1382,32 @@ renderLevels();
 void refreshTones();
 void checkAi();
 
+/* Dev-only preview: on localhost with ?demo, show a backup file (web/demo-backup.json, gitignored)
+   as if read from the amp, so the layout can be checked without an amp. Nothing is sent anywhere. */
+if (['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParams(location.search).has('demo')) {
+  void fetch('./demo-backup.json')
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((b: { slots: SlotRead[] }) => {
+      slots = b.slots;
+      live = b.slots.find((s) => s.preset)?.preset ?? null;
+      transport.state.currentPreset = b.slots.find((s) => s.preset)?.slot ?? null;
+      renderSlots();
+      renderLive();
+      setMessage('Demo preview: showing demo-backup.json — not connected to an amp.', 'info');
+      if (new URLSearchParams(location.search).get('demo') === 'tuner') {
+        // A real reading from the owner's LIVE (E string, 0.444), to check the tuner display.
+        tunerOpen = true;
+        $('tuner').hidden = false;
+        showTunerReading([0x04, 0xca, 0x3e, 0xe3, 0x82, 0x80]);
+      }
+    })
+    .catch((err: Error) => log(`demo preview unavailable: ${err.message}`));
+}
+
 startDevReload(
   () => transport.connected,
   () => {
-    const m = $('message');
-    m.dataset.kind = 'info';
-    m.replaceChildren('Update ready (dev) — reloading disconnects the amp. ', button('Reload', () => location.reload()));
+    toast(['Update ready (dev) — reloading disconnects the amp. ', button('Reload', () => location.reload())], 'info', true);
   },
 );
 

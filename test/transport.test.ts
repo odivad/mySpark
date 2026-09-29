@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CMD_ACTION,
   MessageAssembler,
+  NOTE_NAMES,
   SOFTWARE_PRESET,
   VOLUME,
   type Preset,
@@ -16,8 +17,10 @@ import {
   buildChunk,
   commands,
   parsePreset,
+  parseTunerReading,
   serializePreset,
   settingsWithBpm,
+  tunerCents,
 } from '../src/spark/protocol.js';
 import { SparkTransport, type SparkTiming } from '../src/spark/transport.js';
 import { presetDifferences } from '../src/spark/verify.js';
@@ -328,6 +331,38 @@ describe('amp-wide levels (0x0133 / 0x0233 / 0x0333)', () => {
     amp.notify(buildChunk(0x03, 0x33, [0x09, 0xca, 0x3f, 0x00, 0x00, 0x00], 0x50));
     await new Promise((r) => setTimeout(r, 5));
     expect(t.state.volumes[VOLUME.master]).toBe(0.5);
+  });
+});
+
+describe('built-in tuner (0x0165 / 0x0265 / 0x0364)', () => {
+  it('builds the on command the official app sends, and an off command', () => {
+    expect(commands.setTuner(true)).toEqual({ cmd: 0x01, sub: 0x65, data: [0xc3] });
+    expect(commands.setTuner(false).data).toEqual([0xc2]);
+    expect(commands.getTunerState()).toEqual({ cmd: 0x02, sub: 0x65, data: [] });
+  });
+
+  it('decodes readings from the owner’s LIVE: pitch class and 0.5 = in tune; −1 = no signal', () => {
+    // 0x0364 data from the snoop log (E string, then no signal).
+    const e = parseTunerReading([0x04, 0xca, 0x3e, 0xe3, 0x82, 0x80])!; // 2026-09-27T12:14:28.326Z
+    expect(NOTE_NAMES[e.note]).toBe('E');
+    expect(e.value).toBeCloseTo(0.444, 3);
+    expect(tunerCents(e.value)).toBe(-6);
+    expect(parseTunerReading([0x00, 0xca, 0xbf, 0x80, 0x00, 0x00])).toBeNull();
+  });
+
+  it('turns the tuner on and off, confirmed by reading the state back', async () => {
+    const { amp, t } = await connected();
+    expect(await t.setTuner(true)).toBe(true);
+    expect(amp.tuner).toBe(true);
+    expect(await t.setTuner(false)).toBe(true);
+    expect(amp.tuner).toBe(false);
+  });
+
+  it('reports not confirmed when the amp ignores it', async () => {
+    const amp = new FakeAmp();
+    amp.ignoreWrites = true;
+    const { t } = await connected(amp);
+    expect(await t.setTuner(true)).toBe(false);
   });
 });
 

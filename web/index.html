@@ -12,101 +12,132 @@
 <link rel="stylesheet" href="app.css">
 </head>
 <body data-connection="disconnected">
-<header class="top">
+
+<header class="topbar">
   <div class="brand">
-    <span class="led" aria-hidden="true"></span>
+    <span class="power-led" aria-hidden="true"></span>
     <h1>mySpark</h1>
   </div>
+  <div id="levels" class="levels" aria-label="Amp levels"></div>
   <div class="conn">
     <div class="conn-text">
       <div id="status">Not connected</div>
       <div id="info"></div>
     </div>
+    <button id="tuner-btn" data-needs-amp disabled title="The amp's built-in tuner">Tuner</button>
     <button id="connect" class="primary">Connect</button>
     <button id="disconnect" hidden>Disconnect</button>
   </div>
 </header>
 
-<div id="message" data-kind="info" role="status" aria-live="polite"></div>
-
-<main>
-  <section class="panel">
-    <div class="panel-head">
+<div class="layout">
+  <aside class="sidebar" aria-label="Presets">
+    <div class="side-head">
       <h2>Presets</h2>
       <div id="channel" class="seg" role="group" aria-label="Channel">
         <button data-ch="1" aria-pressed="true">CH1 Guitar</button>
         <button data-ch="2" aria-pressed="false">CH2 Mic / Bass</button>
       </div>
-      <button id="backup" disabled>Back up all</button>
     </div>
     <div id="slots" class="slots"></div>
-  </section>
+    <button id="backup" class="side-action" disabled>Back up all presets</button>
+  </aside>
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Playing now <span id="live-name" class="sub"></span></h2>
-      <button id="save-current" disabled>Save to My tones</button>
+  <main class="main">
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" data-tab="tone" aria-selected="true">Tone</button>
+      <button role="tab" data-tab="ai" aria-selected="false">AI</button>
+      <button role="tab" data-tab="cloud" aria-selected="false">ToneCloud</button>
+      <button role="tab" data-tab="tones" aria-selected="false">My tones</button>
+      <button role="tab" data-tab="log" aria-selected="false">Log</button>
+    </nav>
+
+    <section id="tab-tone" class="tab" role="tabpanel">
+      <div class="tab-head">
+        <h2>Playing now <span id="live-name" class="sub"></span></h2>
+        <button id="save-current" disabled>Save to My tones</button>
+      </div>
+      <div id="amp" class="amp-slot"></div>
+      <div id="live" class="chain"></div>
+    </section>
+
+    <section id="tab-ai" class="tab" role="tabpanel" hidden>
+      <div class="tab-head">
+        <h2>Tone assistant <span class="sub">on-device AI</span></h2>
+        <span id="ai-status" class="sub"></span>
+      </div>
+      <form id="ai-form" class="toolbar">
+        <input id="ai-request" type="text" placeholder="Describe a tone, e.g. warm bluesy crunch with a little reverb" autocomplete="off">
+        <select id="ai-instrument" aria-label="Instrument">
+          <option value="electric" selected>Electric</option>
+          <option value="bass">Bass</option>
+          <option value="acoustic">Acoustic</option>
+        </select>
+        <select id="ai-count" aria-label="Number of suggestions" title="Fewer suggestions come back faster">
+          <option value="2">2 ideas</option>
+          <option value="3" selected>3 ideas</option>
+          <option value="4">4 ideas</option>
+        </select>
+        <button id="ai-generate" class="primary" type="submit" disabled>Suggest</button>
+      </form>
+      <p class="note">Each suggestion is a complete tone for your request, built from models confirmed on your amp, played at the Amp's current <strong>Master</strong> knob. <strong>Try</strong> uses the temporary buffer — no saved slot changes.</p>
+      <div id="ai-results" class="cards"></div>
+    </section>
+
+    <section id="tab-cloud" class="tab" role="tabpanel" hidden>
+      <div class="tab-head">
+        <h2>ToneCloud <span class="sub">Positive Grid's shared presets</span></h2>
+        <span id="tc-status" class="sub"></span>
+      </div>
+      <form id="tc-form" class="toolbar">
+        <input id="tc-query" type="search" placeholder="Search ToneCloud, e.g. SRV, Gilmour, metal, clean jazz" autocomplete="off">
+        <select id="tc-order" aria-label="Sort by">
+          <option value="likes" selected>Most liked</option>
+          <option value="downloads">Most downloaded</option>
+          <option value="latest">Newest</option>
+          <option value="title">Title A–Z</option>
+        </select>
+        <button id="tc-search" class="primary" type="submit">Search</button>
+      </form>
+      <p class="note"><strong>Try</strong> plays a preset in the temporary buffer (CH1) — no saved slot changes. Presets your amp can't play are left out of the list. Unofficial service: it may change or stop working.</p>
+      <div id="tc-results" class="cards"></div>
+      <button id="tc-more" class="more" hidden>More results</button>
+    </section>
+
+    <section id="tab-tones" class="tab" role="tabpanel" hidden>
+      <div class="tab-head">
+        <h2>My tones <span class="sub">saved in this browser</span></h2>
+        <button id="export-tones" disabled>Export</button>
+      </div>
+      <div id="tones" class="cards"></div>
+    </section>
+
+    <section id="tab-log" class="tab" role="tabpanel" hidden>
+      <div class="tab-head"><h2>Log</h2></div>
+      <div id="log"></div>
+    </section>
+  </main>
+</div>
+
+<div id="tuner" class="tuner-overlay" hidden>
+  <div class="tuner-box" role="dialog" aria-modal="true" aria-labelledby="tuner-title">
+    <div class="tuner-head">
+      <h2 id="tuner-title">Tuner</h2>
+      <button id="tuner-close">Close</button>
     </div>
-    <div id="levels" class="levels" aria-label="Amp levels"></div>
-    <div id="live" class="chain"></div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2>Tone assistant <span class="sub">on-device AI</span></h2>
-      <span id="ai-status" class="sub"></span>
+    <div id="tuner-note" class="tuner-note" aria-live="polite">–</div>
+    <div class="tuner-meter" aria-hidden="true">
+      <span class="tick t-50">−50</span><span class="tick t-0">0</span><span class="tick t50">+50</span>
+      <div class="tuner-zone"></div>
+      <div id="tuner-needle" class="tuner-needle"></div>
     </div>
-    <form id="ai-form" class="ai-form">
-      <input id="ai-request" type="text" placeholder="Describe a tone, e.g. warm bluesy crunch with a little reverb" autocomplete="off">
-      <select id="ai-instrument" aria-label="Instrument">
-        <option value="electric" selected>Electric</option>
-        <option value="bass">Bass</option>
-        <option value="acoustic">Acoustic</option>
-      </select>
-      <select id="ai-count" aria-label="Number of suggestions" title="Fewer suggestions come back faster">
-        <option value="2">2 ideas</option>
-        <option value="3" selected>3 ideas</option>
-        <option value="4">4 ideas</option>
-      </select>
-      <button id="ai-generate" class="primary" type="submit" disabled>Suggest</button>
-    </form>
-    <p class="note">Each suggestion is a complete tone for your request, built from models confirmed on your amp, played at the Amp card's current <strong>Master</strong> knob. <strong>Try</strong> uses the temporary buffer — no saved slot changes.</p>
-    <div id="ai-results" class="cards"></div>
-  </section>
+    <div id="tuner-cents" class="tuner-cents">Play a string</div>
+    <div class="tuner-strings">E · A · D · G · B · E</div>
+    <p class="note">The amp's own tuner; the amp may be muted while it's on. Closing turns it off.</p>
+  </div>
+</div>
 
-  <section class="panel">
-    <div class="panel-head">
-      <h2>ToneCloud <span class="sub">Positive Grid's shared presets</span></h2>
-      <span id="tc-status" class="sub"></span>
-    </div>
-    <form id="tc-form" class="ai-form">
-      <input id="tc-query" type="search" placeholder="Search ToneCloud, e.g. SRV, Gilmour, metal, clean jazz" autocomplete="off">
-      <select id="tc-order" aria-label="Sort by">
-        <option value="likes" selected>Most liked</option>
-        <option value="downloads">Most downloaded</option>
-        <option value="latest">Newest</option>
-        <option value="title">Title A–Z</option>
-      </select>
-      <button id="tc-search" class="primary" type="submit">Search</button>
-    </form>
-    <p class="note"><strong>Try</strong> plays a preset in the temporary buffer (CH1) — no saved slot changes. Presets your amp can't play are left out of the list. Unofficial service: it may change or stop working.</p>
-    <div id="tc-results" class="cards"></div>
-    <button id="tc-more" class="more" hidden>More results</button>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2>My tones <span class="sub">saved in this browser</span></h2>
-      <button id="export-tones" disabled>Export</button>
-    </div>
-    <div id="tones" class="cards"></div>
-  </section>
-
-  <details class="panel logbox">
-    <summary>Log</summary>
-    <div id="log"></div>
-  </details>
-</main>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script type="module" src="js/app/main.js"></script>
 </body>

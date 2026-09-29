@@ -3,7 +3,7 @@
  */
 import { CHAIN, type Preset, slotLabel } from '../spark/protocol.js';
 import type { SlotRead } from '../spark/transport.js';
-import { knobName } from '../spark/catalog.js';
+import { MODEL_INFO, knobName } from '../spark/catalog.js';
 
 /** CH1 preset slots on the Spark LIVE: A1–A4, B1–B4. VERIFIED-HW: Spark LIVE. */
 export const LIVE_SLOT_COUNT = 8;
@@ -15,7 +15,7 @@ export const AMP_BLOCK = 3;
  * Amp-block knob names by param index. SOURCED: SparklingTones src/spark-effetti.js (from soundshed);
  * VERIFIED-HW on the Spark LIVE for 0–3 (capture 3, 2026-09-28). Master (4) has no panel knob.
  */
-export const AMP_KNOBS = ['Gain', 'Treble', 'Middle', 'Bass', 'Master'] as const;
+export const AMP_KNOBS = ['Gain', 'Treble', 'Middle', 'Bass', 'Volume'] as const;
 
 /** Display name of a chain position. */
 export function blockName(block: number): string {
@@ -33,13 +33,24 @@ export function paramName(block: number, index: number, modelId?: string): strin
   return `P${index}`;
 }
 
+/** Knob names that are switches or selectors, not continuous knobs: a slider would send in-between values. */
+// Digital Delay's MODE is a continuous range knob (ToneCloud presets store 0.30–0.70), so it isn't listed.
+const SWITCH_LIKE = /^(mode selector|limit\/compress|chorus ?\/ ?vibrato|hp\/lp|bpm|type)$/i;
+
 /**
- * Which params the app lets you edit. Only the amp block's named knobs: their indices are verified
- * on the Spark LIVE, and they are continuous. Other blocks wait for the effect catalogue, which
- * also marks discrete params (e.g. reverb type) that a slider would set to in-between values.
+ * Which params get a slider (CH1 only). Amp block: the verified knobs. Other blocks: the knobs the
+ * catalogue names (SOURCED), except switch/selector knobs (Mode, Limit/Compress, Chorus/Vibrato,
+ * HP/LP, BPM, reverb Type) and params beyond the named knobs — on Noise Gate and Reverb that extra
+ * param is the block's on/off (SparklingTones), which the footswitch handles.
+ * Owner request 2026-09-28: sliders on all effects.
  */
-export function isEditableParam(block: number, index: number): boolean {
-  return block === AMP_BLOCK && index < AMP_KNOBS.length;
+export function isEditableParam(block: number, index: number, modelId?: string): boolean {
+  if (block === AMP_BLOCK) return index < AMP_KNOBS.length;
+  if (!modelId) return false;
+  const info = MODEL_INFO[modelId];
+  if (!info || index >= info.knobs.length) return false;
+  if (info.choices?.[index] || info.switches?.includes(index)) return false;
+  return !SWITCH_LIKE.test(info.knobs[index]);
 }
 
 /** The amp stores 0–1; the panel and the official app show 0–10. */

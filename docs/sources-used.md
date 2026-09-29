@@ -2,6 +2,11 @@
 
 This document lists the public sources that informed the Spark interface notes, protocol understanding, and memory-map model used in this project.
 
+## 0a) The official Spark app's data files (owner's copy, v4.6.2)
+
+- Pulled from the owner's phone with `adb` (personal use); stored in the git-ignored `captures/raw/apk/`. Only the plain JSON assets were read (default block per model, display order); no code decompiled; nothing licence-related examined.
+- Used for: reverb type values, which params are switches, official display names and order.
+
 ## 0) Positive Grid official Amp & Effect List
 
 - https://help.positivegrid.com/hc/en-us/articles/8140276955917-Amp-Effect-List (updated 2026-09-27; read via the public API at `https://help.positivegrid.com/api/v2/help_center/en-us/articles/8140276955917.json` because the page is behind a browser check)

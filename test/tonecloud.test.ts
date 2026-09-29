@@ -21,6 +21,11 @@ describe('ToneCloud', () => {
     expect(serializePreset(p, SOFTWARE_TARGET).length).toBeGreaterThan(100);
   });
 
+  it('reads switches stored as true/false (the official app format) as 1 / 0', () => {
+    const p = cloudToPreset({ sigpath: [{ dspId: 'Cloner', active: true, params: [{ index: 0, value: 0.35 }, { index: 1, value: false }] }] });
+    expect(p.effects[0].params).toEqual([{ index: 0, value: 0.35 }, { index: 1, value: 0 }]);
+  });
+
   it('rejects malformed preset data with a reason', () => {
     expect(() => cloudToPreset('not json')).toThrow(/valid JSON/);
     expect(() => cloudToPreset({ meta: {} })).toThrow(/no sigpath/);

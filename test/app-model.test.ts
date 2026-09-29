@@ -12,13 +12,29 @@ function preset0() {
 
 describe('labels', () => {
   it('names amp knobs by index order, not panel order (VERIFIED-HW: Spark LIVE)', () => {
-    expect([0, 1, 2, 3].map((i) => paramName(AMP_BLOCK, i))).toEqual(['Gain', 'Treble', 'Middle', 'Bass']);
+    expect([0, 1, 2, 3, 4].map((i) => paramName(AMP_BLOCK, i))).toEqual(['Gain', 'Treble', 'Middle', 'Bass', 'Volume']);
   });
 
   it('only lets the amp block’s named knobs be edited', () => {
     expect([0, 1, 2, 3, 4].every((i) => isEditableParam(AMP_BLOCK, i))).toBe(true);
     expect(isEditableParam(AMP_BLOCK, 5)).toBe(false);
     expect(isEditableParam(6, 0)).toBe(false);
+  });
+
+  it('gives sliders to named pedal knobs, but not to switches, selectors or the hidden on/off', () => {
+    expect(isEditableParam(2, 0, 'ProCoRat')).toBe(true); // Distortion
+    expect(isEditableParam(5, 2, 'DelayMono')).toBe(true); // D.Time
+    expect(isEditableParam(5, 3, 'DelayMono')).toBe(true); // Mode: a continuous range knob (ToneCloud values 0.30–0.70)
+    expect(isEditableParam(5, 4, 'DelayMono')).toBe(false); // BPM: an on/off dropdown instead
+    expect(isEditableParam(1, 0, 'LA2AComp')).toBe(false); // Limit/Compress
+    expect(isEditableParam(6, 0, 'bias.reverb')).toBe(true); // Level
+    expect(isEditableParam(6, 6, 'bias.reverb')).toBe(false); // Type: dropdown
+    expect(isEditableParam(6, 7, 'bias.reverb')).toBe(false); // hidden on/off
+    expect(isEditableParam(0, 2, 'bias.noisegate')).toBe(false); // hidden on/off
+    expect(isEditableParam(1, 0, 'MicComp')).toBe(false); // CH2 model, knobs unknown
+    expect(isEditableParam(4, 1, 'Cloner')).toBe(false); // a true/false switch in the official app's data
+    expect(isEditableParam(4, 0, 'Cloner')).toBe(true);
+    expect(isEditableParam(2, 0, 'NotAModel')).toBe(false);
   });
 
   it('leaves other blocks numbered', () => {

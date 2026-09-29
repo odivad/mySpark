@@ -79,10 +79,14 @@ export function cloudToPreset(presetData: unknown): Preset {
       name: block.dspId,
       enabled: block.active === true,
       params: params.map((p: unknown, j: number) => {
-        if (!isObject(p) || !Number.isInteger(p.index) || typeof p.value !== 'number') {
+        // The official app stores on/off switches as true/false (its own default presets in the
+        // Spark app APK do); the amp holds them as 0 / 1.
+        const raw = isObject(p) ? p.value : undefined;
+        const value = typeof raw === 'boolean' ? Number(raw) : raw;
+        if (!isObject(p) || !Number.isInteger(p.index) || typeof value !== 'number' || !Number.isFinite(value)) {
           throw new Error(`block ${i + 1} (${block.dspId}) param ${j + 1} is malformed`);
         }
-        return { index: p.index as number, value: p.value };
+        return { index: p.index as number, value };
       }),
     };
   });

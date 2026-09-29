@@ -1,6 +1,6 @@
 // mySpark service worker: makes the app installable and usable offline.
 // Network first, so a rebuilt app shows up on the next load; the cache is the offline fallback.
-const CACHE = 'myspark-v4';
+const CACHE = 'myspark-v5';
 const SHELL = [
   './',
   './index.html',

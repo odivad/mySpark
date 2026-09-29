@@ -7,3 +7,4 @@ dist/
 *.keystore
 web/js/
 captures/raw/
+web/demo-backup.json

@@ -35,12 +35,31 @@ export interface ModelInfo {
   knobs: string[];
   /** Params that pick between positions instead of sliding: index → position names. */
   choices?: Record<number, string[]>;
+  /** Stored value of each position in `choices`, when not 0, 0.1, 0.2 … (e.g. an on/off switch: [0, 1]). */
+  choiceValues?: Record<number, number[]>;
   /** Adjusted with sliders in the official app (graphic EQs). */
   sliders?: boolean;
+  /**
+   * Params the official app stores as true/false in its default presets (Spark app 4.6.2 APK,
+   * assets/ModulePresets/…/data.json): on/off switches, sent to and read from the amp as 0 / 1.
+   * Which label goes with which value is not known yet, so they aren't editable.
+   */
+  switches?: number[];
 }
 
-const AMP_KNOBS = ['Gain', 'Treble', 'Middle', 'Bass', 'Master'];
+// Index order; the official app labels the fifth knob VOLUME (owner screenshot, Spark LIVE, 2026-09-28).
+const AMP_KNOBS = ['Gain', 'Treble', 'Middle', 'Bass', 'Volume'];
 const amp = (name: string, real: string, group: string): ModelInfo => ({ name, real, group, knobs: AMP_KNOBS });
+
+/**
+ * The delays' BPM switch (tempo sync): an on/off toggle in the official app (owner screenshots,
+ * Vintage Delay "BPM ON/OFF", Digital Delay "BPM"). Stored as 0 or 1 in every ToneCloud preset
+ * sampled (2026-09-28). 1 = on is the natural reading; not yet confirmed by ear.
+ */
+const bpmSwitch = (index: number): Pick<ModelInfo, 'choices' | 'choiceValues'> => ({
+  choices: { [index]: ['BPM sync off', 'BPM sync on'] },
+  choiceValues: { [index]: [0, 1] },
+});
 
 /** Jimi Hendrix Pack: paid content on the Spark 2; silent until the official app unlocks it. */
 export const HENDRIX_PREFIX = 'JH.';
@@ -56,7 +75,11 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
   Compressor: { name: 'Red Comp', real: 'MXR Dyna Comp', realSource: 'secondary', knobs: ['Output', 'Sensitivity'] },
   BassComp: { name: 'Bass Comp', knobs: ['Comp', 'Gain'] },
   BBEOpticalComp: { name: 'Optical Comp', knobs: ['Volume', 'Comp', 'Pad'] },
-  'JH.Vox846': { name: 'J.H. Legendary Wah', real: 'Vox 846 wah-wah pedal', knobs: ['P1', 'Mode', 'P3', 'P4', 'P5'] },
+  /* Auto Wah (added by Positive Grid 2026-09-02, free) and the Hendrix pack's J.H. Legendary Wah are
+     two entries in the official app but ONE model id: presets with either come back as `JH.Vox846`
+     (SOURCED: SparklingTones, two dedicated captures on a Spark 2). The difference is in the params,
+     not yet decoded — UNVERIFIED on the LIVE. */
+  'JH.Vox846': { name: 'J.H. Legendary Wah / Auto Wah', real: 'Vox 846 wah-wah pedal', knobs: ['P1', 'Mode', 'P3', 'P4', 'P5'] },
 
   /* Drive */
   Booster: { name: 'Booster', knobs: ['Gain'] },
@@ -72,7 +95,7 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
   BassBigMuff: { name: 'Bass Muff', knobs: ['Volume', 'Tone', 'Sustain'] },
   GuitarMuff: { name: 'Guitar Muff', knobs: ['Volume', 'Tone', 'Sustain'] },
   MaestroBassmaster: { name: 'Bassmaster', knobs: ['Brass Vol', 'Sensitivity', 'Bass Vol'] },
-  SABdriver: { name: 'SAB Driver', knobs: ['Volume', 'Tone', 'Drive', 'HP/LP'] },
+  SABdriver: { name: 'SAB Driver', knobs: ['Volume', 'Tone', 'Drive', 'HP/LP'], switches: [3] },
 
   /* Amps */
   RolandJC120: amp('Silver 120', 'Roland JC120', 'Clean'),
@@ -121,9 +144,9 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
   Flanger: { name: 'Flanger', knobs: ['Rate', 'Mix', 'Depth'] },
   Phaser: { name: 'Phaser', knobs: ['Speed', 'Intensity'] },
   Vibrato01: { name: 'Vibrato', knobs: ['Speed', 'Depth'] },
-  UniVibe: { name: 'UniVibe', knobs: ['Speed', 'Chorus / Vibrato', 'Intensity'] },
+  UniVibe: { name: 'UniVibe', knobs: ['Speed', 'Chorus / Vibrato', 'Intensity'], switches: [1] },
   'JH.VoodooVibeJr': { name: 'J.H. Legendary Vibe', real: 'Roger Mayer Voodoo Vibe Junior', knobs: ['Speed', 'Sweep', 'Intensity', 'Chorus/Vibrato'] },
-  Cloner: { name: 'Cloner Chorus', knobs: ['Rate', 'Depth'] },
+  Cloner: { name: 'Cloner Chorus', knobs: ['Rate', 'Depth'], switches: [1] },
   MiniVibe: { name: 'Classic Vibe', knobs: ['Speed', 'Intensity'] },
   Tremolator: { name: 'Tremolator', real: 'Demeter Tremulator', realSource: 'secondary', knobs: ['Depth', 'Speed', 'BPM'] },
   TremoloSquare: { name: 'Tremolo Square', knobs: ['Speed', 'Depth', 'Level'] },
@@ -131,21 +154,24 @@ export const MODEL_INFO: Record<string, ModelInfo> = {
   BassEQ6: { name: 'Bass EQ', sliders: true, knobs: ['Level', '50', '120', '400', '800', '4.5K', '10K'] },
 
   /* Delay */
-  DelayMono: { name: 'Digital Delay', knobs: ['E.Level', 'F.Back', 'D.Time', 'Mode', 'BPM'] },
-  DelayEchoFilt: { name: 'Echo Filt', knobs: ['Delay', 'Feedback', 'Level', 'Tone', 'BPM'] },
-  VintageDelay: { name: 'Vintage Delay', knobs: ['Repeat Rate', 'Intensity', 'Echo', 'BPM'] },
-  DelayReverse: { name: 'Reverse Delay', knobs: ['Mix', 'Decay', 'Filter', 'Time', 'BPM'] },
-  DelayMultiHead: { name: 'Multi Head', knobs: ['Repeat Rate', 'Intensity', 'Echo Vol', 'Mode Selector', 'BPM'] },
-  DelayRe201: { name: 'Echo Tape', knobs: ['Sustain', 'Volume', 'Tone', 'Short -> Long', 'BPM'] },
+  DelayMono: { name: 'Digital Delay', knobs: ['E.Level', 'F.Back', 'D.Time', 'Mode', 'BPM'], ...bpmSwitch(4) },
+  DelayEchoFilt: { name: 'Echo Filt', knobs: ['Delay', 'Feedback', 'Level', 'Tone', 'BPM'], ...bpmSwitch(4) },
+  VintageDelay: { name: 'Vintage Delay', knobs: ['Repeat Rate', 'Intensity', 'Echo', 'BPM'], ...bpmSwitch(3) },
+  DelayReverse: { name: 'Reverse Delay', knobs: ['Mix', 'Decay', 'Filter', 'Time', 'BPM'], ...bpmSwitch(4) },
+  DelayMultiHead: { name: 'Multi Head', knobs: ['Repeat Rate', 'Intensity', 'Echo Vol', 'Mode Selector', 'BPM'], ...bpmSwitch(4) },
+  DelayRe201: { name: 'Echo Tape', knobs: ['Sustain', 'Volume', 'Tone', 'Short -> Long', 'BPM'], ...bpmSwitch(4) },
 
-  /* Reverb: one model; param 6 is the reverb type (values 0, 0.1 … 0.8). The type order is
-     SparklingTones' reading of the official app, to be confirmed by ear. */
+  /* Reverb: one model; param 6 is the reverb type. Names in the official app's order (01–09, owner
+     screenshots), each with the value the official app itself stores for it: its default preset per
+     type in the Spark app 4.6.2 APK (assets/ModulePresets/Reverb/<type>/data.json). The value order
+     is NOT the display order — SparklingTones' assumption (0, 0.1 … in display order) was wrong. */
   'bias.reverb': {
     name: 'Reverb',
     knobs: ['Level', 'Damping', 'Low Cut', 'High Cut', 'Dwell', 'Time', 'Type'],
     choices: {
       6: ['Room Studio A', 'Chamber', 'Hall Natural', 'Plate Short', 'Hall Ambient', 'Plate Rich', 'Hall Medium', 'Plate Long', 'Room Studio B'],
     },
+    choiceValues: { 6: [0, 0.2, 0.3, 0.6, 0.5, 0.7, 0.4, 0.8, 0.1] },
   },
 };
 

@@ -181,6 +181,34 @@ Read-only probes, no credentials. SOURCED (ToneCloud, live API):
 - `GET /v2/preset/{id}` → `preset_data` (JSON string): `meta {id, name, version, description, icon}`, `bpm`, `sigpath[] {type, dspId, active, params[{index, value}]}` → `cloudToPreset` maps it onto our `Preset`.
 - Items include creator profiles (other people's names); the app neither shows nor stores them, and the test fixture has them removed.
 
+## 2026-09-28 — Built-in tuner, from the official app's traffic
+
+From `captures/raw/btsnoop_hci.log.last` (official app on the owner's Spark LIVE, a tuner session on 2026-09-27). `VERIFIED-HW (owner, Spark LIVE, official app traffic)` unless marked:
+- **On: `0x0165 [0xc3]`** → ACK `0x0465` → the amp streams **`0x0364 [note, 0xca float32]` about every 60 ms** (1,095 readings in ~70 s).
+- **State: `0x0265` → `0x0365 [bool]`** (the app asks at connect; the reply was `c2` = off).
+- **`note` = pitch class, C = 0 … B = 11**: the strings played gave 4, 9, 2, 7, 11, 4 = E A D G B E (standard tuning). **Float −1.0 = no signal.** Otherwise the value settles near **0.5 when in tune**.
+- **UNVERIFIED:** off = `0x0165 [0xc2]` (not in the log; the app confirms it by reading `0x0265` back), and the scale 0–1 = −50…+50 cents (our reading of the data).
+- App: **Tuner** button in the top bar, full-screen display with note, meter and cents. Closing (or Esc) turns the amp's tuner off and confirms. Needs an owner test: whether the amp mutes, whether off works, whether the cents scale feels right against another tuner.
+
+## 2026-09-28 — The official Spark app's own data files (APK 4.6.2)
+
+Owner request ("suck the spark.apk out and disassemble it"; "this is a personal app"). `com.positivegrid.spark` 4.6.2 (versionCode 10098) pulled from the owner's phone with `adb` into the git-ignored `captures/raw/apk/`. **No code was decompiled.** Everything below comes from plain JSON data files in the APK's `assets/`. Hard line kept: nothing about licence keys or unlocking paid content was looked at or used. The app is native Android (Kotlin/Java dex) plus native libraries; the protocol likely sits in `libpghw-lib.so` (not examined).
+
+SOURCED (official app data, Spark app 4.6.2):
+- **`assets/ModulePresets/<category>/<model>/data.json`**: the default block for every model, in ToneCloud's `{dspId, active, params[{index, value}]}` format. **`order.json`** per category: the official display names and order.
+- **Reverb type values are NOT in display order.** Official list 01–09 and the value each default stores for param 6: Room Studio A 0.0, Chamber 0.2, Hall Natural 0.3, Plate Short 0.6, Hall Ambient 0.5, Plate Rich 0.7, Hall Medium 0.4, Plate Long 0.8, Room Studio B 0.1. SparklingTones had assumed 0, 0.1 … in display order, which gave wrong names; fixed in `catalog.ts` (`choiceValues`). The earlier "type 3.0 = Plate Short" readings were really **Hall Natural**.
+- **Switches are stored as `true`/`false`**: UniVibe p1, SAB Driver p3, Cloner p1, the delays' BPM on Digital Delay / Echo Filt / Reverse / Multi Head. Others are stored as 0/1 integers (LA Comp p0, Vintage Delay p3, Echo Tape p4, Tremolator p2). The amp holds them as 0 / 1. So ToneCloud presets with `false` in a param are valid (fixed in `cloudToPreset`), and **Cloner's p1 is a switch, not "Depth"**.
+- **App ids differ from what the amp reports** for some models, so the app renames when it talks to the amp: CH2 preamps `MicPreamp73` / `AcousticPreamp` / `BassPreamp` (amp: `Preamp73`, `ParaAcousticPreAmp`, `SansAmpBassDriver`), and Auto Wah `Vox846.Auto` (amp: `JH.Vox846`, per SparklingTones). This also confirms our inferred CH2 preamp name matches ("Acoustic Preamp", "Bass DI").
+- Official display names: e.g. "MATCH DC", "Preamp 73", "J.H Tone City 100". The amp list order is by family, with the Hendrix amps placed among them.
+- **Data files exist for models the app doesn't list** (not in any `order.json`): `AutoWah01`, `Leslie01`, `Qtron`, `BassOctaveEBS`, `DelayOla`, `AntiFeedback` (CH2), `MetalZoneMT2`, `TrebleBooster`. Not offered by mySpark.
+- **CH2 (`ModulePresets-IN2`) chain slots:** Pedal1 (gate, comps, drives, wahs) → Preamp → Pedal2 (mods and delays, plus AntiFeedback) → Pedal3 (reverbs).
+- Knob names are not in the assets (they're in code or resources): the names in `catalog.ts` remain SparklingTones'/Soundshed's, checked against the owner's screenshots where available.
+
+## 2026-09-28 — Auto Wah is `JH.Vox846` too
+
+Owner: "missing auto wah". SparklingTones (`src/spark-effetti.js`, Spark 2, two dedicated captures): Positive Grid's free **Auto Wah** (added 2026-09-02) and the Hendrix **J.H. Legendary Wah** are two entries in the official app but the **same model id `JH.Vox846`**, with 6 params. The difference is in the param values, not decoded. The picker now shows "J.H. Legendary Wah / Auto Wah".
+- # TO DO (owner + AI): select Auto Wah in the official app on the LIVE, then read the live state from mySpark, to learn which param values make it "Auto". Then offer Auto Wah as its own choice that sets those values.
+
 ## 2026-09-28 — CH2 (mic / acoustic / bass) reads, from the official app's traffic
 
 From the two snoop logs (`captures/raw/`, decoded; test vectors in `test/fixtures/live-captures.ts`). `VERIFIED-HW (owner, Spark LIVE, official app traffic)`:

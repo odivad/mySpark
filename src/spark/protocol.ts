@@ -343,6 +343,16 @@ export const commands = {
     data: [...encByte(target), ...encFloat(clamp01(value))],
   }),
 
+  /**
+   * Built-in tuner on/off: 0x0165 [bool]. On (`c3`) is what the official app sends on the owner's
+   * Spark LIVE (HCI snoop log, 2026-09-28; the amp ACKs with 0x0465 and streams 0x0364). Off (`c2`)
+   * is by symmetry — UNVERIFIED; the transport confirms it with getTunerState.
+   */
+  setTuner: (on: boolean): SparkCommand => ({ cmd: CMD_ACTION, sub: 0x65, data: [...encOnOff(on)] }),
+
+  /** Tuner state: 0x0265 → 0x0365 [bool]. Seen from the official app on the owner's Spark LIVE. */
+  getTunerState: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x65, data: [] }),
+
   /** Reads one level; the amp answers 0x0333 [float] with the request's seq. Same source. */
   getVolume: (target: number): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x33, data: [...encByte(target)] }),
 };
@@ -353,6 +363,40 @@ export const commands = {
  * then 09. 09 is also what the amp reports when the back-panel MASTER VOL knob turns (capture 4).
  * The official app also reads 01, 03, 04 and 0e at connect; their meaning is UNVERIFIED — not used.
  */
+export interface TunerReading {
+  /** Pitch class, C = 0 … B = 11. */
+  note: number;
+  /** 0–1, 0.5 = in tune. */
+  value: number;
+}
+
+export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
+
+/**
+ * 0x0364 from the amp while the tuner is on, about every 60 ms: [note, float]. From the owner's
+ * Spark LIVE (official app snoop log, 2026-09-28, 1,095 readings):
+ * - note = pitch class C = 0 … B = 11: strings played gave 4, 9, 2, 7, 11 (E A D G B), strong evidence;
+ * - float −1.0 = no signal; otherwise it settles near 0.5 when a string is in tune.
+ * Reading 0–1 as −50…+50 cents is our interpretation (UNVERIFIED).
+ * @returns null when there is no signal or the layout is unexpected
+ */
+export function parseTunerReading(data: readonly number[]): TunerReading | null {
+  try {
+    const r = new Reader(data);
+    const note = r.int();
+    const value = r.float();
+    if (!Number.isFinite(value) || value < 0 || note > 11) return null;
+    return { note, value };
+  } catch {
+    return null;
+  }
+}
+
+/** Cents off from the nearest note, by the −50…+50 reading of the tuner value (UNVERIFIED scale). */
+export function tunerCents(value: number): number {
+  return Math.round((value - 0.5) * 100);
+}
+
 export const VOLUME = {
   guitar: 0x00,
   music: 0x05,

@@ -758,6 +758,24 @@ export class SparkTransport {
   }
 
   /**
+   * Turns the amp's built-in tuner on or off, then reads its state back (0x0265 → 0x0365).
+   * While on, the amp streams 0x0364 readings (see parseTunerReading) and usually mutes its output.
+   * @returns whether the amp confirms the requested state
+   */
+  async setTuner(on: boolean): Promise<boolean> {
+    await this.send(commands.setTuner(on));
+    const reply = await this.request(commands.getTunerState(), isNotify(0x65));
+    let state: boolean | null = null;
+    try {
+      state = reply ? new Reader(reply.data).bool() : null;
+    } catch {
+      state = null;
+    }
+    this.onLog(`tuner ${on ? 'on' : 'off'}: amp reports ${state === null ? 'nothing' : state ? 'on' : 'off'}`);
+    return state === on;
+  }
+
+  /**
    * Reads one amp-wide level (0x0233 [target] → 0x0333 [float], matched by seq). Observed on the
    * owner's Spark LIVE from the official app; mySpark's use not yet hardware-tested.
    * @returns 0..1, or null if the amp doesn't answer

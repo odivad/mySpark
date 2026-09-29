@@ -61,3 +61,14 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [x] CH1 / CH2 toggle; CH2 view-only (slots `0x03 n`, live `0x04 00`, current via `0x021a`) — needs owner check
 - [ ] CH2 switching and editing: needs a snoop log of the official app switching a CH2 preset, changing a CH2 knob and a CH2 model
 
+## Look and layout (owner brief 2026-09-28)
+
+- [x] Amp panel + pedalboard look (black/gold, colour-coded pedals, LED footswitches), sliders only, amp above the chain with an "AMP" tap in the signal line, system light/dark, PC first
+- [x] Top bar with Guitar/Music/Master; presets column with red/green LEDs; tabs Tone · AI · ToneCloud · My tones · Log; toast messages
+- [x] Reverb type as a dropdown of the 9 types (param 6 of `bias.reverb`, positions 0, 0.1 … 0.8); verified by read-back — # TO CONFIRM (owner): the type names match what you hear (order from SparklingTones)
+- [x] Sliders on all named pedal knobs (`0x0104` + read-back), except switch/selector knobs and the hidden on/off param; filled slider tracks — needs owner hardware test (amp knobs verified; other effects via SparklingTones' use of the same command)
+- [x] Official app data (APK 4.6.2 assets): corrected reverb type values, switch params, true/false switches in ToneCloud presets; amp knob 5 labelled Volume
+- [ ] Switch toggles (LA Comp Limit/Compress, UniVibe Chorus/Vibrato, SAB HP/LP, Cloner): which label is 0 and which is 1 — one check on the amp
+- [x] Built-in tuner (owner request 2026-09-28): `0x0165` on/off with `0x0265` read-back, `0x0364` readings; Tuner button + display — needs owner hardware test
+- [x] Playing highlight on AI / ToneCloud / My tones cards (owner request)
+

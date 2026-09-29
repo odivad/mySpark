@@ -45,6 +45,7 @@ export class FakeAmp {
   looperSettings: number[];
   /** Presets in other banks (e.g. CH2 `3:n`, `4:0`), by "bank:number". */
   readonly banks = new Map<string, number[]>();
+  tuner = false;
   /** Levels by 0x0133 target. */
   volumes: Record<number, number> = { 0x00: 0.25, 0x05: 0, 0x09: 0.53 };
 
@@ -198,6 +199,11 @@ export class FakeAmp {
         if (effect) effect.name = to;
       });
       this.reply(CMD_ACK, 0x06, [], m.seq);
+    } else if (m.cmd === CMD_ACTION && m.sub === 0x65) {
+      if (!this.ignoreWrites) this.tuner = m.data[0] === 0xc3;
+      this.reply(CMD_ACK, 0x65, [], m.seq);
+    } else if (m.cmd === CMD_QUERY && m.sub === 0x65) {
+      this.reply(CMD_NOTIFY, 0x65, [this.tuner ? 0xc3 : 0xc2], m.seq);
     } else if (m.cmd === CMD_QUERY && m.sub === 0x33) {
       if (!this.silent) this.reply(CMD_NOTIFY, 0x33, encFloat(this.volumes[m.data[0]] ?? 0), m.seq);
     } else if (m.cmd === CMD_ACTION && m.sub === 0x33) {
