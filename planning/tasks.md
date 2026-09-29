@@ -28,8 +28,36 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 
 ## ToneCloud (requested by owner 2026-09-28)
 
-- [ ] Browse/search Positive Grid ToneCloud from the app (no login; direct `GET https://api.positivegrid.com/v2/preset…`, see lessons-learned)
-- [ ] Convert a ToneCloud `preset_data` into our preset model; check every `dspId` against the target amp's model list before sending
-- [ ] Load a ToneCloud preset into the amp's live buffer `0x7f` (try before saving); saving to a slot follows the slot-write rules
-- [ ] Save ToneCloud presets to the local library (JSON)
+- [x] Browse/search Positive Grid ToneCloud from the app (no login; direct `GET https://api.positivegrid.com/v2/preset…`, see lessons-learned) — `src/app/tonecloud.ts`, ToneCloud panel; needs owner check
+- [x] Convert a ToneCloud `preset_data` into our preset model; check every `dspId` against the target amp's model list before sending (Spark 2 list + models confirmed on the amp)
+- [x] Load a ToneCloud preset into the amp's live buffer `0x7f` (Try, verified by read-back); saving to a slot follows the slot-write rules (not built)
+- [x] Save ToneCloud presets to the local library (My tones, IndexedDB; Export as JSON)
+
+## App v1 (approved by owner 2026-09-28; ADR-0005)
+
+- [x] `web/` PWA shell: page, styles, manifest, service worker, icons; `tsconfig.app.json` compiles `src/` → `web/js/`
+- [x] Connect; on connect read name/serial, all 8 slots and live state
+- [x] Preset list A1–B4 with the current CH1 slot highlighted, following `0x0338` from the amp
+- [x] Tap a preset to switch (`0x0138`), verified by reading live state back and comparing with the slot — owner tested 2026-09-28
+- [x] Live chain view (7 blocks, model, on/off, params 0–10), updated from `0x0337`; amp-block knob names only (VERIFIED-HW)
+- [x] Back up all 8 presets to a local JSON file
+- [x] Tone editing (owner request 2026-09-28): amp-block knobs (Gain/Treble/Middle/Bass/Master) via `0x0104` and block on/off via `0x0115`, each verified by reading live state back — owner tested 2026-09-28
+- [ ] Later: port SparklingTones' effect catalogue (`spark-effetti.js`) for model/knob names, discrete params and the known-model safety list, then editing for the other blocks; slot save (backup exists now); hosting for Android (https)
+
+## Tone assistant and My tones (owner request 2026-09-28; spec `docs/ai-tone-assistant.md`)
+
+- [x] Standard prompt and JSON result format, with checks (`src/app/tone-ai.ts`, 10 tests)
+- [x] On-device AI through the browser's built-in model (Chrome Prompt API) — no API key, nothing leaves the PC
+- [x] Suggestions as a list; **Try** plays one in the temporary buffer `0x7f`, verified by read-back
+- [x] **Save** to My tones (IndexedDB in the browser); Apply, Delete, Export; "Save to My tones" for the tone playing now
+- [ ] Owner test: built-in AI available on the owner's PC; suggestions sensible; Try verified
+- [x] Suggestions are standalone tones from the request, not variations of the current tone (owner, 2026-09-28)
+- [x] Effect catalogue ported (`src/spark/catalog.ts`); every model with real names in the prompt; knob names shown for all blocks
+- [x] Model picker per block: any Spark 2 model, verified by read-back and remembered per amp (`0x0106`); owner tested 2026-09-28 and chose to drop the untried-model warning
+- [x] AI speed: fixed instructions processed once and reused; timer shown
+- [x] Guitar / Music / Master level sliders (`0x0133`, read-back via `0x0233`), found in the official app's snoop log — owner tested 2026-09-28
+- [x] `tools/snoop/decode-btsnoop.ts`: decodes Android HCI snoop logs into Spark messages
+- [x] AI instrument toggle: electric / bass / acoustic (owner request 2026-09-28)
+- [x] CH1 / CH2 toggle; CH2 view-only (slots `0x03 n`, live `0x04 00`, current via `0x021a`) — needs owner check
+- [ ] CH2 switching and editing: needs a snoop log of the official app switching a CH2 preset, changing a CH2 knob and a CH2 model
 

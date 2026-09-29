@@ -41,9 +41,9 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 | Tests | Vitest 5 (`npm test`, tests in `test/`) | in place |
 | Lint / format | ESLint + Prettier (defaults) | planned |
 | CI | GitHub Actions | later |
-| UI framework | — | # TO CONFIRM |
+| UI framework | None — plain TypeScript + DOM, no bundler; `web/` is the app | ADR-0005 |
 | BLE access | Web Bluetooth (PC + Android) | ADR-0004 — Android verified 2026-09-28 |
-| Persistence | Local JSON files (preset backups/exports) | planned |
+| Persistence | Local JSON files (backups, tone export) + IndexedDB in the browser (My tones, models seen per amp) | in place |
 
 ## Layers (from `docs/spark2-bt-protocol.md`)
 
@@ -55,8 +55,12 @@ The model is detected at connect time (BLE device name, then `02 11` get-amp-nam
 Current code:
 - `src/spark/protocol.ts` — pure codec: framing (`F0 01 … F7`), 7/8-bit packing, value types, commands, preset parse/serialize/validate. Ported from SparklingTones.
 - `src/spark/transport.ts` — `SparkTransport`: Web Bluetooth connect, serialized send queue, reassembly, reply waiting, preset read, and verified preset writes (`loadPreset`, `storePreset`, `setBpm`). Ported from SparklingTones. Uses `navigator.bluetooth` directly (no transport abstraction — see `planning/ideas.md`); tests inject a fake with the same shape. Refuses write commands (`0x01`) unless the device name is `Spark LIVE BLE`, until the Spark GO profile exists.
+- `src/spark/catalog.ts` — model catalogue: names, real gear, knob names by param index, Spark 2 model list per position (SOURCED; ported from SparklingTones/Soundshed).
 - `src/spark/verify.ts` — `presetDifferences`, the read-back comparison behind every preset write.
 - `src/index.ts` — re-exports the above.
+- `src/app/` — the app UI (ADR-0005): `main.ts` (DOM: connect, preset list, verified switch, live chain view, backup) and `model.ts` (DOM-free labels, formatting, backup format). Compiled by `tsconfig.app.json` into `web/js/`.
+- `src/app/tone-ai.ts` — tone assistant prompt, result schema and safety checks (spec: `docs/ai-tone-assistant.md`); `browser-ai.ts` — adapter for the browser's built-in model (Chrome Prompt API, on-device); `tone-db.ts` — My tones library in IndexedDB.
+- `web/` — the installable PWA: `index.html`, `app.css`, `manifest.webmanifest`, `sw.js` (network-first cache), `icons/`. `web/js/` is build output (gitignored).
 
 ## Architectural invariants
 

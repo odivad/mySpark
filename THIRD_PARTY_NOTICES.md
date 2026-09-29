@@ -9,6 +9,7 @@ https://github.com/mazzrelaz/SparklingTones — ported from commit `f25379d` (20
 Ported to TypeScript (translated comments, renamed identifiers, same behavior):
 
 - `src/spark-protocol.js` → `src/spark/protocol.ts`
+- `src/spark-effetti.js` → `src/spark/catalog.ts` (model names, real-gear names, knob names, Spark 2 model list; the names come from Soundshed, see below)
 - `src/spark-transport.js` → `src/spark/transport.ts` (with changes: read-back verification of preset and bpm writes, Spark-LIVE-only write guard, BLE write errors propagated)
 - `test/protocol-test.html` and `test/fixtures/preset0.js` → `test/protocol.test.ts` and `test/fixtures/sparklingtones.ts` (real Spark 2 captures)
 
@@ -38,7 +39,7 @@ SOFTWARE.
 
 SparklingTones' own `NOTICE` credits:
 
-- **Soundshed** (MIT, https://github.com/soundshed/soundshed-app, Copyright (c) Soundshed contributors) — effect and knob display names, from `src/spork/src/devices/spark/sparkFxCatalog.ts`. Applies to mySpark if/when the effect catalogue (`spark-effetti.js`) is ported.
+- **Soundshed** (MIT, https://github.com/soundshed/soundshed-app, Copyright (c) Soundshed contributors) — effect and knob display names, from `src/spork/src/devices/spark/sparkFxCatalog.ts`. Applies to mySpark: the catalogue was ported into `src/spark/catalog.ts` (2026-09-28).
 - **paulhamsh/Spark** (Apache 2.0, https://github.com/paulhamsh/Spark) — used by SparklingTones as reference for the message format. SparklingTones' code is written from scratch; comments citing `SparkIO.ino` lines are kept in our port as references.
 
 ## Soundshed — MIT License

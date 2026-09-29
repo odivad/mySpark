@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.app.json",
+    "test": "vitest run",
+    "build:app": "tsc -p tsconfig.app.json"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

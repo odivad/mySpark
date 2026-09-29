@@ -2,6 +2,11 @@
 
 This document lists the public sources that informed the Spark interface notes, protocol understanding, and memory-map model used in this project.
 
+## 0) Positive Grid official Amp & Effect List
+
+- https://help.positivegrid.com/hc/en-us/articles/8140276955917-Amp-Effect-List (updated 2026-09-27; read via the public API at `https://help.positivegrid.com/api/v2/help_center/en-us/articles/8140276955917.json` because the page is behind a browser check)
+- Used for: the gear each amp and Jimi Hendrix item is inspired by (`src/spark/catalog.ts`). Effects there are names only.
+
 ## 1) Primary source: SparklingTones
 
 Main project:

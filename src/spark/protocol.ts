@@ -309,11 +309,56 @@ export const commands = {
   getPreset: (n: number): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x01, data: [0x00, n & 0xff] }),
   /** VERIFIED-HW: Spark LIVE. */
   getLiveState: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x01, data: [0x01, 0x00] }),
+
+  /**
+   * Reads a preset by [bank, number], padded to 32 bytes exactly as the official Spark app sends it
+   * (owner's Spark LIVE, HCI snoop log 2026-09-28). Banks: 0x00 CH1 slot, 0x01 CH1 live,
+   * 0x03 CH2 slot, 0x04 CH2 live — see BANK. Used for CH2, where only the official app's form is known.
+   */
+  getPresetAt: (bank: number, n: number): SparkCommand => ({
+    cmd: CMD_QUERY,
+    sub: 0x01,
+    data: [bank & 0xff, n & 0xff, ...new Array<number>(30).fill(0)],
+  }),
+
+  /**
+   * Asks which preset each channel is on: 0x021a [0x92, 0x00, 0x01] (fixarray of channels 0 and 1),
+   * as the official app sends it. Reply 0x031a — see parseChannelPresets.
+   */
+  getChannelPresets: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x1a, data: [0x92, 0x00, 0x01] }),
   getCurrentPreset: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x10, data: [] }),
   getName: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x11, data: [] }),
   getSerial: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x23, data: [] }),
   getFirmware: (): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x2f, data: [] }),
+
+  /**
+   * Amp-wide level (guitar, music, master), 0..1. **No trailing 0x00.** The amp sends no ACK;
+   * only a read-back (getVolume) proves it. Observed on the owner's Spark LIVE: what the official
+   * Spark app sends when its Guitar/Music/Master sliders move (HCI snoop log, 2026-09-28).
+   * VERIFIED-HW: Spark LIVE — mySpark's sliders, read back, owner-tested 2026-09-28.
+   */
+  setVolume: (target: number, value: number): SparkCommand => ({
+    cmd: CMD_ACTION,
+    sub: 0x33,
+    data: [...encByte(target), ...encFloat(clamp01(value))],
+  }),
+
+  /** Reads one level; the amp answers 0x0333 [float] with the request's seq. Same source. */
+  getVolume: (target: number): SparkCommand => ({ cmd: CMD_QUERY, sub: 0x33, data: [...encByte(target)] }),
 };
+
+/**
+ * Targets of 0x0133 / 0x0233 / 0x0333. From the official Spark app on the owner's Spark LIVE (HCI snoop
+ * log, 2026-09-28): the owner moved Guitar, then Music, then Master, and the app wrote 00, then 05,
+ * then 09. 09 is also what the amp reports when the back-panel MASTER VOL knob turns (capture 4).
+ * The official app also reads 01, 03, 04 and 0e at connect; their meaning is UNVERIFIED — not used.
+ */
+export const VOLUME = {
+  guitar: 0x00,
+  music: 0x05,
+  master: 0x09,
+} as const;
+export type VolumeName = keyof typeof VOLUME;
 
 /* ----------------------------------------------------------------------
    BPM, which lives inside the looper settings. SOURCED: SparklingTones.
@@ -553,6 +598,39 @@ export function slotLabel(n: number): SlotLabel {
  * names, and an honest number beats an invented label.
  */
 export const CHAIN = ['Noise gate', 'Comp / Wah', 'Drive', 'Amp', 'Modulation', 'Delay', 'Reverb'] as const;
+
+/**
+ * Preset banks on the Spark LIVE, from the official app's reads (owner's HCI snoop log, 2026-09-28):
+ * CH1 = the guitar channel (7-block chain), CH2 = the mic/acoustic/bass channel (4-block chain).
+ */
+export const BANK = { ch1Slot: 0x00, ch1Live: 0x01, ch2Slot: 0x03, ch2Live: 0x04 } as const;
+
+/**
+ * CH2's four chain positions. Descriptive labels from the models seen there on the owner's LIVE
+ * (MicComp/Comp76/LA2AComp/BassComp/VocalDrive/DistortionTS9 → Preamp73/ParaAcousticPreAmp/
+ * SansAmpBassDriver → BassEQ6/GuitarEQ6/VocalChorus → bias.reverb/Vocal…Reverb), not names from a source.
+ */
+export const CHAIN_CH2 = ['Comp / Drive', 'Preamp', 'EQ / Mod', 'Reverb'] as const;
+
+export interface ChannelPreset {
+  channel: number;
+  preset: number;
+  /** Turns true when a knob moves (seen on the LIVE); likely "edited since loaded". UNVERIFIED. */
+  flag: boolean;
+}
+
+/**
+ * 0x031a: fixarray of [channel, preset, bool] triples, e.g. `92 00 03 c3 01 00 c2` = CH1 (0) on
+ * slot 3 flagged, CH2 (1) on slot 0. VERIFIED-HW on the Spark LIVE (official app log, captures).
+ * The amp also sends a one-channel form unprompted when knobs move (`91 00 03 c3`).
+ */
+export function parseChannelPresets(data: readonly number[]): ChannelPreset[] {
+  const r = new Reader(data);
+  const n = r.arrayLen();
+  const out: ChannelPreset[] = [];
+  for (let i = 0; i < n; i++) out.push({ channel: r.int(), preset: r.int(), flag: r.bool() });
+  return out;
+}
 
 export interface PresetTarget {
   bank: number;

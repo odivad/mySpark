@@ -27,6 +27,7 @@ import {
   Reader,
   SOFTWARE_PRESET,
   SOFTWARE_TARGET,
+  type ChannelPreset,
   type Preset,
   type PresetTarget,
   type SparkCommand,
@@ -35,6 +36,7 @@ import {
   bpmFromSettings,
   commands,
   encode,
+  parseChannelPresets,
   parsePreset,
   serializePreset,
   settingsWithBpm,
@@ -174,9 +176,13 @@ export interface SparkAmpState {
   currentPreset: number | null;
   /** Raw [bank, number] of the last 0x0338 switch the amp announced, any bank (e.g. CH2 = 0x03). */
   lastPresetSwitch: { bank: number; number: number } | null;
+  /** Current CH2 slot (bank 0x03), from 0x0338 or 0x031a. */
+  ch2Preset: number | null;
   /** Last 0x0376 payload. BPM writes are built from these, never from scratch. */
   looperSettings: number[] | null;
   bpm: number | null;
+  /** Amp-wide levels by 0x0133 target (see VOLUME), from reads and 0x0333 notifications. */
+  volumes: Record<number, number>;
 }
 
 export interface SlotRead {
@@ -209,6 +215,37 @@ export interface VerifiedWriteResult extends PresetUploadResult {
   /** Differences between what was written and what the amp reports; empty when verified. */
   differences: string[];
   readBack: Preset | null;
+}
+
+export interface SwitchResult {
+  /** True only when the live state read back matches the slot's content. */
+  verified: boolean;
+  differences: string[];
+  slotPreset: Preset | null;
+  live: Preset | null;
+}
+
+export interface ParamCheck {
+  verified: boolean;
+  /** The value the amp should hold, as float32. */
+  expected: number;
+  /** What the amp reports, or null if the read failed or the param wasn't found. */
+  actual: number | null;
+  live: Preset | null;
+}
+
+export interface ModelCheck {
+  verified: boolean;
+  expected: string;
+  actual: string | null;
+  live: Preset | null;
+}
+
+export interface EnabledCheck {
+  verified: boolean;
+  expected: boolean;
+  actual: boolean | null;
+  live: Preset | null;
 }
 
 export interface BpmWriteResult {
@@ -244,8 +281,10 @@ export class SparkTransport {
     serial: null,
     currentPreset: null,
     lastPresetSwitch: null,
+    ch2Preset: null,
     looperSettings: null,
     bpm: null,
+    volumes: {},
   };
 
   /**
@@ -457,6 +496,12 @@ export class SparkTransport {
         const [bank, number] = m.data;
         this.state.lastPresetSwitch = { bank, number };
         if (m.data.length === 2 && bank === 0x00) this.state.currentPreset = number;
+        if (m.data.length === 2 && bank === 0x03) this.state.ch2Preset = number;
+      } else if (m.sub === 0x1a) {
+        for (const c of parseChannelPresets(m.data)) {
+          if (c.channel === 0 && this.state.currentPreset !== SOFTWARE_PRESET) this.state.currentPreset = c.preset;
+          if (c.channel === 1) this.state.ch2Preset = c.preset;
+        }
       } else if (m.sub === 0x10) {
         // Reply to 0x0210. SOURCED: SparklingTones (last byte); its layout on the LIVE is UNVERIFIED.
         this.state.currentPreset = m.data[m.data.length - 1];
@@ -467,6 +512,11 @@ export class SparkTransport {
       } else if (m.sub === 0x76) {
         this.state.looperSettings = Array.from(m.data);
         this.state.bpm = bpmFromSettings(m.data);
+      } else if (m.sub === 0x33 && m.data.length === 6) {
+        // A level changed on the amp (e.g. the MASTER VOL knob): [target, float]. VERIFIED-HW: Spark LIVE.
+        const r = new Reader(m.data);
+        const target = r.int();
+        this.state.volumes[target] = r.float();
       } else if (m.sub === 0x63) {
         // BPM alone, as the amp's TAP sends it: a float.
         const v = new Reader(m.data).float();
@@ -488,6 +538,20 @@ export class SparkTransport {
   }
 
   /** Reads the sound currently playing, which is not one of the saved slots. */
+  /**
+   * Reads a preset by bank (see BANK), in the official app's padded form. For CH2:
+   * readPresetAt(BANK.ch2Slot, n) and readPresetAt(BANK.ch2Live, 0). Read-only.
+   */
+  readPresetAt(bank: number, n: number, timeoutMs?: number): Promise<Preset | null> {
+    return this.readPresetVia(commands.getPresetAt(bank, n), `bank ${bank} preset ${n}`, timeoutMs);
+  }
+
+  /** Which preset each channel is on (0x021a → 0x031a). Updates state; null if no reply. */
+  async readChannelPresets(timeoutMs?: number): Promise<ChannelPreset[] | null> {
+    const msg = await this.request(commands.getChannelPresets(), isNotify(0x1a), timeoutMs);
+    return msg ? parseChannelPresets(msg.data) : null;
+  }
+
   readLiveState(timeoutMs?: number): Promise<Preset | null> {
     return this.readPresetVia(commands.getLiveState(), 'live state', timeoutMs);
   }
@@ -602,8 +666,132 @@ export class SparkTransport {
     const upload = await this.writePreset(preset, SOFTWARE_TARGET, onProgress, options);
     if (!upload.sent) return { ...upload, verified: false, differences: [], readBack: null };
     await this.send(commands.changePreset(SOFTWARE_PRESET));
+    this.state.currentPreset = SOFTWARE_PRESET; // playing the buffer, not a saved slot
     await sleep(this.timing.loadSettleDelay);
     return this.verify(upload, preset, await this.readLiveState(), 'live state');
+  }
+
+  /**
+   * Switches the amp to a saved CH1 slot (0x0138 [0x00, slot]), then reads the slot and the live
+   * state back and checks the amp is playing that slot's content.
+   * 0x0138 is VERIFIED-HW on the Spark LIVE (SparklingTones; mySpark loadPreset uses it for 0x7f);
+   * this verified switch to a saved slot is not yet hardware-tested.
+   *
+   * Changes live amp state: needs owner approval and a hardware test before use.
+   *
+   * @param slotCount slots on the connected amp (8 for the Spark LIVE)
+   */
+  async switchPreset(slot: number, slotCount: number): Promise<SwitchResult> {
+    if (!Number.isInteger(slot) || slot < 0 || slot >= slotCount) {
+      throw new Error(`Slot ${slot} outside 0–${slotCount - 1}`);
+    }
+    await this.send(commands.changePreset(slot));
+    await sleep(this.timing.loadSettleDelay);
+    const slotPreset = await this.readPreset(slot);
+    const live = await this.readLiveState();
+    if (!slotPreset || !live) {
+      const differences = [`no read-back of ${!slotPreset ? `slot ${slot}` : 'live state'} from the amp`];
+      this.onLog(`switch to slot ${slot}: ${differences[0]} — NOT verified`);
+      return { verified: false, differences, slotPreset, live };
+    }
+    const differences = presetDifferences(slotPreset, live);
+    const verified = differences.length === 0;
+    if (verified) this.state.currentPreset = slot;
+    this.onLog(`switch to slot ${slot}: ${verified ? 'verified' : `NOT verified (${differences.length} differences)`}`);
+    return { verified, differences, slotPreset, live };
+  }
+
+  /**
+   * Knob change (0x0104), **not verified** — for streaming values while a slider moves. Follow it
+   * with verifyParam once the value settles. The amp sends no ACK for 0x0104 (SOURCED: soundshed),
+   * so only a read-back proves anything. VERIFIED-HW: Spark LIVE (via SparklingTones, amp block).
+   *
+   * Changes live amp state: needs owner approval and a hardware test before use.
+   */
+  async changeParam(effectName: string, index: number, value: number): Promise<void> {
+    if (!Number.isFinite(value)) throw new Error(`Knob value is not a number: ${value}`);
+    if (!Number.isInteger(index) || index < 0 || index > 0x7f) throw new Error(`Invalid param index ${index}`);
+    await this.send(commands.changeParam(effectName, index, value));
+  }
+
+  /** Reads live state and checks one param holds `value` (float32, clamped 0–1 like changeParam). */
+  async verifyParam(effectName: string, index: number, value: number): Promise<ParamCheck> {
+    const live = await this.readLiveState();
+    const actual = live?.effects.find((e) => e.name === effectName)?.params.find((p) => p.index === index)?.value ?? null;
+    const expected = Math.fround(Math.max(0, Math.min(1, value)));
+    const verified = actual === expected;
+    this.onLog(`${effectName} param ${index}: ${verified ? 'verified' : `NOT verified (amp has ${actual})`}`);
+    return { verified, expected, actual, live };
+  }
+
+  /**
+   * Turns a block on or off (0x0115), then reads live state back and checks.
+   * VERIFIED-HW: Spark LIVE (via SparklingTones). Changes live amp state: needs owner approval
+   * and a hardware test before use.
+   */
+  async setEffectEnabled(effectName: string, on: boolean): Promise<EnabledCheck> {
+    await this.send(commands.effectOnOff(effectName, on));
+    const live = await this.readLiveState();
+    const actual = live?.effects.find((e) => e.name === effectName)?.enabled ?? null;
+    const verified = actual === on;
+    this.onLog(`${effectName} ${on ? 'on' : 'off'}: ${verified ? 'verified' : `NOT verified (amp has ${actual})`}`);
+    return { verified, expected: on, actual, live };
+  }
+
+  /**
+   * Changes the model of one chain position (0x0106 [old name, new name, 0x00]), then reads live
+   * state back and checks the position now holds `newName`. VERIFIED-HW: Spark LIVE for the models
+   * the owner tried via SparklingTones. **A model the amp lacks can freeze it until power-off**
+   * (SparklingTones, Spark 2): the caller must only send models known on this amp, or get the
+   * owner's explicit go-ahead for an untried one.
+   *
+   * Changes live amp state: needs owner approval and a hardware test before use.
+   */
+  async setEffectModel(position: number, oldName: string, newName: string): Promise<ModelCheck> {
+    await this.send(commands.changeEffectModel(oldName, newName));
+    await sleep(this.timing.loadSettleDelay);
+    const live = await this.readLiveState();
+    const actual = live?.effects[position]?.name ?? null;
+    const verified = actual === newName;
+    this.onLog(`position ${position} ${oldName} → ${newName}: ${verified ? 'verified' : `NOT verified (amp has ${actual})`}`);
+    return { verified, expected: newName, actual, live };
+  }
+
+  /**
+   * Reads one amp-wide level (0x0233 [target] → 0x0333 [float], matched by seq). Observed on the
+   * owner's Spark LIVE from the official app; mySpark's use not yet hardware-tested.
+   * @returns 0..1, or null if the amp doesn't answer
+   */
+  async readVolume(target: number, timeoutMs?: number): Promise<number | null> {
+    const seq = this.nextSeq();
+    const pending = this.wait(
+      (m) => m.cmd === CMD_NOTIFY && m.sub === 0x33 && m.seq === seq && m.data.length === 5,
+      timeoutMs ?? this.timing.defaultTimeout,
+    );
+    await this.send(commands.getVolume(target), { seq });
+    const reply = await pending;
+    if (!reply) return null;
+    const value = new Reader(reply.data).float();
+    this.state.volumes[target] = value;
+    return value;
+  }
+
+  /**
+   * Sets one amp-wide level (0x0133), **not verified** — for streaming while a slider moves.
+   * Follow it with verifyVolume. Changes live amp state: needs owner approval and a hardware test.
+   */
+  async changeVolume(target: number, value: number): Promise<void> {
+    if (!Number.isFinite(value)) throw new Error(`Volume is not a number: ${value}`);
+    await this.send(commands.setVolume(target, value));
+  }
+
+  /** Reads a level back and checks it holds `value` (float32, clamped 0–1). */
+  async verifyVolume(target: number, value: number): Promise<{ verified: boolean; expected: number; actual: number | null }> {
+    const actual = await this.readVolume(target);
+    const expected = Math.fround(Math.max(0, Math.min(1, value)));
+    const verified = actual === expected;
+    this.onLog(`volume 0x${hex(target)}: ${verified ? 'verified' : `NOT verified (amp has ${actual})`}`);
+    return { verified, expected, actual };
   }
 
   /**

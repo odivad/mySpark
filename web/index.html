@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>mySpark</title>
+<meta name="description" content="Personal controller for Spark amps over Bluetooth.">
+<meta name="theme-color" content="#121212">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-connection="disconnected">
+<header class="top">
+  <div class="brand">
+    <span class="led" aria-hidden="true"></span>
+    <h1>mySpark</h1>
+  </div>
+  <div class="conn">
+    <div class="conn-text">
+      <div id="status">Not connected</div>
+      <div id="info"></div>
+    </div>
+    <button id="connect" class="primary">Connect</button>
+    <button id="disconnect" hidden>Disconnect</button>
+  </div>
+</header>
+
+<div id="message" data-kind="info" role="status" aria-live="polite"></div>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Presets</h2>
+      <div id="channel" class="seg" role="group" aria-label="Channel">
+        <button data-ch="1" aria-pressed="true">CH1 Guitar</button>
+        <button data-ch="2" aria-pressed="false">CH2 Mic / Bass</button>
+      </div>
+      <button id="backup" disabled>Back up all</button>
+    </div>
+    <div id="slots" class="slots"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Playing now <span id="live-name" class="sub"></span></h2>
+      <button id="save-current" disabled>Save to My tones</button>
+    </div>
+    <div id="levels" class="levels" aria-label="Amp levels"></div>
+    <div id="live" class="chain"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Tone assistant <span class="sub">on-device AI</span></h2>
+      <span id="ai-status" class="sub"></span>
+    </div>
+    <form id="ai-form" class="ai-form">
+      <input id="ai-request" type="text" placeholder="Describe a tone, e.g. warm bluesy crunch with a little reverb" autocomplete="off">
+      <select id="ai-instrument" aria-label="Instrument">
+        <option value="electric" selected>Electric</option>
+        <option value="bass">Bass</option>
+        <option value="acoustic">Acoustic</option>
+      </select>
+      <select id="ai-count" aria-label="Number of suggestions" title="Fewer suggestions come back faster">
+        <option value="2">2 ideas</option>
+        <option value="3" selected>3 ideas</option>
+        <option value="4">4 ideas</option>
+      </select>
+      <button id="ai-generate" class="primary" type="submit" disabled>Suggest</button>
+    </form>
+    <p class="note">Each suggestion is a complete tone for your request, built from models confirmed on your amp, played at the Amp card's current <strong>Master</strong> knob. <strong>Try</strong> uses the temporary buffer — no saved slot changes.</p>
+    <div id="ai-results" class="cards"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>ToneCloud <span class="sub">Positive Grid's shared presets</span></h2>
+      <span id="tc-status" class="sub"></span>
+    </div>
+    <form id="tc-form" class="ai-form">
+      <input id="tc-query" type="search" placeholder="Search ToneCloud, e.g. SRV, Gilmour, metal, clean jazz" autocomplete="off">
+      <select id="tc-order" aria-label="Sort by">
+        <option value="likes" selected>Most liked</option>
+        <option value="downloads">Most downloaded</option>
+        <option value="latest">Newest</option>
+        <option value="title">Title A–Z</option>
+      </select>
+      <button id="tc-search" class="primary" type="submit">Search</button>
+    </form>
+    <p class="note"><strong>Try</strong> plays a preset in the temporary buffer (CH1) — no saved slot changes. Presets your amp can't play are left out of the list. Unofficial service: it may change or stop working.</p>
+    <div id="tc-results" class="cards"></div>
+    <button id="tc-more" class="more" hidden>More results</button>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>My tones <span class="sub">saved in this browser</span></h2>
+      <button id="export-tones" disabled>Export</button>
+    </div>
+    <div id="tones" class="cards"></div>
+  </section>
+
+  <details class="panel logbox">
+    <summary>Log</summary>
+    <div id="log"></div>
+  </details>
+</main>
+
+<script type="module" src="js/app/main.js"></script>
+</body>
+</html>

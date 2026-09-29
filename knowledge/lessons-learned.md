@@ -159,9 +159,91 @@ Capture: `captures/2026-09-28-live-capture-3-mapping.json`, one marker per contr
 - **Guitar volume and Music volume send nothing** over BLE — no message of any kind while they were turned. The app cannot see them.
 - **One preset-button press → `0x0338 [0x00, 0x02]`.** # TO CONFIRM (owner): which preset the amp showed afterwards (slot 2 = A3 under the A1–A4/B1–B4 layout).
 - **`0x031a` (`91 00 03 c3`) arrives right before the first `0x0337` of a connection** — seen twice, both times immediately ahead of the first knob message, not tied to a preset switch as first thought. Meaning still **UNVERIFIED**.
+  - **Update 2026-09-28:** SparklingTones' protocol doc (`docs/protocollo-spark2.en.md`, Spark 2) describes it: "`0x031a`, undocumented, emitted while the knobs move: decodes as `array[1] 0 <current preset> true`". Our `91 00 03 c3` = `array[1]`, `0`, `3`, `true`, and the current preset was slot 3 in capture 2. SOURCED (SparklingTones), consistent with the LIVE. The meaning of the `0` and `true` fields is still unknown.
 - **The amp's own seq wraps `0x7f` → `0x40`** (seen `…7e, 7f` then `40`). Amp range is `0x40`–`0x7f`. SparklingTones only says "above `0x3f`".
 
 Consequence for the controller: it can keep its cache in sync by listening, instead of polling — apply `0x0338`/`0x0337` to the cached state, then confirm with a read (`0x0201`) when it matters.
+
+## 2026-09-28 — ToneCloud: older presets have no model list; unsupported ones hidden
+
+- **95 of the top 100 "popular" presets have `preset_meta: null`** in search results (older presets, e.g. "Metallica", 2019). Their chain is only in the full preset. The first version read that as "0 blocks" and hid Try: a bug. Now they're shown and checked when loaded.
+- Sampled after loading: 29 of the top 30 pass (7 blocks, all models on the Spark 2 list). The one failure, "Come As You Are - Nirvana", has a Cloner param stored as `false` instead of a number. Rejected; no value guessed.
+- **Owner decision:** "just don't show unsupported tones". The list leaves out anything the search result rules out (unknown model, non-`in1` input, not 7 blocks). A preset that fails the check when loaded disappears from the list with a note, and nothing is sent.
+- ToneCloud's `order` parameter: `popular` = sorted by likes (highest first), `latest`, `alphabet` (raw title, leading spaces first). `likes`/`downloads` are ignored. "Most downloaded" in the app re-sorts the popular results locally.
+
+## 2026-09-28 — ToneCloud probe (for the app's ToneCloud panel)
+
+Read-only probes, no credentials. SOURCED (ToneCloud, live API):
+- `GET /v2/preset?page=&page_size=&preset_for=spark[&keyword=]` → JSON array; still `Access-Control-Allow-Origin: *`.
+- Each item has `preset_meta.dspId` (the 7 model ids in chain order): the app flags unsafe presets **before** fetching them.
+- `signal_chain_type` was `in1` for all 50 sampled: guitar input, 7-block chain. The app only offers `in1`, 7-block presets.
+- `preset_for` = `sparklive`, `spark_live`, `spark2`, `sparkgo`, `spark_go` all return **no** presets; everything is under `spark`.
+- `GET /v2/preset/{id}` → `preset_data` (JSON string): `meta {id, name, version, description, icon}`, `bpm`, `sigpath[] {type, dspId, active, params[{index, value}]}` → `cloudToPreset` maps it onto our `Preset`.
+- Items include creator profiles (other people's names); the app neither shows nor stores them, and the test fixture has them removed.
+
+## 2026-09-28 — CH2 (mic / acoustic / bass) reads, from the official app's traffic
+
+From the two snoop logs (`captures/raw/`, decoded; test vectors in `test/fixtures/live-captures.ts`). `VERIFIED-HW (owner, Spark LIVE, official app traffic)`:
+- **`0x0201 [bank, n]`, which the official app pads to 32 bytes.** Banks: `0x00` CH1 slot, `0x01` CH1 live, **`0x03` CH2 slot, `0x04` CH2 live** (`BANK` in `protocol.ts`). mySpark reads CH2 in the padded form (`commands.getPresetAt`).
+- **CH2 presets have 4 blocks** (vs CH1's 7), e.g. "Vocal - Lead": `MicComp → Preamp73 → BassEQ6 → bias.reverb`; "Bass - Overdriven Bass": `DistortionTS9 → SansAmpBassDriver → BassEQ6 → bias.reverb`. They parse and re-serialize byte for byte with the existing codec. The labels `Comp / Drive, Preamp, EQ / Mod, Reverb` are ours, descriptive of the models seen.
+- **CH2-only model ids:** `MicComp`, `Comp76`, `VocalDrive`, `Preamp73`, `ParaAcousticPreAmp`, `SansAmpBassDriver`, `VocalChorus`, `VocalMellowReverb`, `VocalBrilliantReverb`. Matching `ParaAcousticPreAmp` to "Acoustic Preamp" and `SansAmpBassDriver` to "Bass DI" is our inference (UNVERIFIED).
+- **`0x021a [0x92, 0x00, 0x01]` → `0x031a`** = fixarray of `[channel, preset, bool]` per channel, e.g. `92 00 03 c3 01 00 c2` = CH1 slot 3 (true), CH2 slot 0 (false). The bool turns true when a knob moves; "edited" is likely but UNVERIFIED. This also explains the unprompted `0x031a` in captures 2 and 3.
+- **Not seen in either log:** switching a CH2 preset, uploading to CH2, or editing a CH2 knob. The app shows CH2 **view-only**. Next: a snoop log of the official app doing those on CH2.
+- On CH1, the owner's slots have `GuitarEQ6` in the Modulation position: the Spark 2 "mod/EQ" slot works the same on the LIVE.
+
+## 2026-09-28 — Owner decision: no warning for untried models in the picker
+
+After every untried Spark 2 amp, pedal and Hendrix model they tried worked on the LIVE, the owner asked to "get rid of the not yet tried warning, just load the change". The model picker now switches to any model on the Spark 2 list without asking, and still verifies by read-back. Residual risk, accepted by the owner: a model the LIVE lacks could freeze it until power-off. The AI assistant is unchanged: it only uses models confirmed on this amp.
+
+## 2026-09-28 — What the models are based on: Positive Grid's official list
+
+Source: Positive Grid Help Center "Amp & Effect List" (article 8140276955917, updated 2026-09-27). The web page is behind a Cloudflare browser check; its text was read through the help centre's public Zendesk API (`/api/v2/help_center/en-us/articles/8140276955917.json`). SOURCED (official).
+- **All 36 amps and the 12 Jimi Hendrix items list the gear they're inspired by.** Every amp matched SparklingTones' table.
+- **The 51 effects are listed by Spark name only.** Six "inspired by" names (Clone Drive, Tube Drive, Black Op, Sustain Comp, Red Comp, Tremolator) come from Positive Grid's "Spark Effect List Rev20220827" PDF **as quoted by web search results**. The PDF itself (Scribd / device.report) couldn't be opened, so they're marked `realSource: 'secondary'` in `src/spark/catalog.ts`.
+- **Correction:** when porting the catalogue, the AI had added "based on" names for five effects, guessed from their internal ids (Klon Centaur, Ibanez TS9, ProCo RAT, EHX Big Muff, Roland RE-201). That broke the "never invent" rule. Removed, or replaced by the secondary-source names where one exists.
+- The same page says the **Jimi Hendrix pack stopped being sold on 30 April 2026**, lists **Auto Wah** among the Comp effects (SparklingTones: same id as `JH.Vox846`), and marks CH2-only items for the Spark LIVE: MIC Preamp 73, Acoustic Preamp, Bass DI, Comp 76, Mic Comp, Vocal Drive, Vocal Chorus, Vocal Echo, Vocal Mellow Reverb, Vocal Brilliant Reverb.
+- # TO CONFIRM (owner): if you can open the Rev20220827 PDF, share it. It would confirm the six secondary names and fill in the rest.
+
+## 2026-09-28 — Volume commands found in the official app's Bluetooth log
+
+Source: Android HCI snoop log from the owner's phone (moto g power 5G 2023), official Spark app connected to the **Spark LIVE**. The owner moved **Guitar**, then **Music**, then **Master** from 0 to 100% (all three shown as 0–100% in the app). Decoded with `tools/snoop/decode-btsnoop.ts`. The Spark messages only are in `captures/2026-09-28-live-official-app-volumes.json`; the raw bug report and log stay in the git-ignored `captures/raw/` (they hold unrelated phone data).
+
+`VERIFIED-HW (owner, Spark LIVE, official app traffic)`:
+- **Set a level: `0x0133 [target, 0xca float32]`, no trailing `0x00`.** 175 writes during the three sweeps, values 0.0–1.0.
+- **Targets in the order moved: `0x00` = Guitar, `0x05` = Music, `0x09` = Master.** `0x09` is also what the amp reports when the back-panel MASTER VOL knob turns (`0x0333 [0x09, float]`, capture 4).
+- **No ACK** for `0x0133` (no `0x0433` in the log). Only a read proves it.
+- **Read a level: `0x0233 [target]` → amp replies `0x0333 [0xca float32]`** (no target byte, same seq). The official app reads targets `05, 00, 01, 03, 04, 09, 0e` at connect (values then: 0.00, 0.25, 0.69, 0.41, 0.41, 0.53, 0.00).
+- **Unknown targets `0x01`, `0x03`, `0x04`, `0x0e`: UNVERIFIED.** Candidates: CH2 VOL, CH3/4 VOL, MASTER LOW/MID/HIGH. Not used by mySpark.
+- Other commands the official app used that no source documents: `0x019b`, `0x021a`, `0x022b`, `0x0272`–`0x0274`, `0x02a2`, `0x02a8`–`0x02aa`, plus the licence key `0x0170`. Not investigated.
+
+mySpark's use (`commands.setVolume/getVolume`, `SparkTransport.changeVolume/readVolume/verifyVolume`, Guitar/Music/Master sliders with read-back): **owner report "vol sliders work"** — `VERIFIED-HW (owner, Spark LIVE, via mySpark app)`, 2026-09-28.
+
+## 2026-09-28 — No volume command in SparklingTones
+
+Owner asked for a guitar volume slider. Searched all of SparklingTones (latest commit is still `f25379d`): **no command for guitar, music or master volume.** Its protocol doc lists `0x0101 0x0104 0x0106 0x0115 0x0127 0x0138 0x0170 0x0175 0x0176 0x0201 0x022a 0x022f 0x0301 0x0315 0x031a 0x0337 0x0363 0x0376 0x0377 0x0401 0x0470`. The owner says the official Spark app *does* have a guitar volume control for the LIVE, so the next step is an Android HCI snoop log of the official app (instructions given 2026-09-28).
+
+## 2026-09-28 — Model picker: untried Spark 2 models work on the LIVE
+
+Owner test with the app's model picker: **"tried a few of the amps in not tried, all seemed to work, and other pedals. JH items worked fine too."** `VERIFIED-HW (owner, Spark LIVE, via mySpark app, 0x0106 + read-back)` for the models tried. Exactly which ones is recorded in the app's IndexedDB (`blocks:Spark LIVE BLE`), not here. None froze the amp.
+- Evidence that the LIVE's guitar channel has the Spark 2 model list, but only for the models tried. Keep the warning for untried ones.
+- **Hendrix (`JH.*`) models played from mySpark.** # TO CONFIRM (owner): had the official Spark app connected since the amp was last powered on? If not, the LIVE doesn't need the Spark 2's per-session unlock.
+- `chrome://on-device-internals` on the owner's PC: **Device performance class: Medium**. That explains slow AI answers; the app now offers 2–4 suggestions per request (default 3) and reuses the primed system prompt.
+- Owner asked for a master volume. The app now shows the tone's **Master** (amp param 4, settable via `0x0104`, verified) at the top of "Playing now", and the back-panel **MASTER VOL** knob read-only from `0x0333`. No command to *set* the panel master is known; none is guessed.
+
+## 2026-09-28 — Owner owns the Jimi Hendrix pack
+
+Owner statement: they have the Jimi Hendrix amps and pedals add-on. SparklingTones (Spark 2): `JH.*` models are silent after power-on until the official app unlocks them with a per-session licence key (`0x0170`) that other apps can't reproduce. **UNVERIFIED on the LIVE.** If a Hendrix model plays silent from mySpark, this is the first suspect. The model picker warns about it.
+
+## 2026-09-28 — Tone editing and first AI suggestions (owner test)
+
+- **Amp-block sliders (`0x0104`) and block on/off (`0x0115`) from the mySpark app work** — owner: "seem to work fine for the amp". `VERIFIED-HW (owner, Spark LIVE, via mySpark app)`. Other blocks are not editable yet (no verified knob map; catalogue not ported).
+- **The on-device AI ran and produced suggestions** on the owner's PC (Chrome built-in model available).
+- **Bug found:** suggestions start from the tone playing now and could not change the amp block's on/off, so after the owner had turned the amp block off, suggestions played with the amp off. Fixed: a suggestion always has the amp on.
+- **Level jumps between suggestions** ("some very low and others very high"). The app can't hear the amp; the prompt now asks the AI to keep loudness near the current tone (guidance only). Measured levelling via the LIVE's USB-C audio is logged in `planning/ideas.md`.
+
+## 2026-09-28 — App v1 works on the Spark LIVE
+
+`web/` (ADR-0005) in Chrome on the Windows PC. Owner report: **"seems fine"** — connect with automatic read, preset list, tap-to-switch (`SparkTransport.switchPreset`, read-back verified), live chain view, backup. `VERIFIED-HW (owner, Spark LIVE, via mySpark app v1)` at that level of detail; no failures reported.
 
 ## 2026-09-28 — mySpark's first write: temporary-buffer load, verified by read-back
 

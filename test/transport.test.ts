@@ -9,12 +9,14 @@ import {
   CMD_ACTION,
   MessageAssembler,
   SOFTWARE_PRESET,
+  VOLUME,
   type Preset,
   type SparkMessage,
   assemblePresetPayload,
   buildChunk,
   commands,
   parsePreset,
+  serializePreset,
   settingsWithBpm,
 } from '../src/spark/protocol.js';
 import { SparkTransport, type SparkTiming } from '../src/spark/transport.js';
@@ -192,6 +194,140 @@ describe('loadPreset (software buffer 0x7f)', () => {
     (bad.effects[0].params[0] as { value: unknown }).value = 'loud';
     await expect(t.loadPreset(bad)).rejects.toThrow(/Preset not sent/);
     expect(amp.received).toHaveLength(0);
+  });
+});
+
+describe('switchPreset (saved slot)', () => {
+  const twoSlots = (): FakeAmp => {
+    const other = copy(parsePreset(capturedPreset0Payload()));
+    other.name = 'Other';
+    other.effects[3].params[0].value = 0.25;
+    return new FakeAmp({ slots: new Map([[0, capturedPreset0Payload()], [1, serializePreset(other, 1)]]) });
+  };
+
+  it('switches with 0x0138 [0x00, slot], then verifies live state against the slot', async () => {
+    const { amp, t } = await connected(twoSlots());
+    const result = await t.switchPreset(1, 8);
+    expect(writes(amp, 0x38).map((m) => m.data)).toEqual([[0x00, 0x01]]);
+    expect(result.verified).toBe(true);
+    expect(result.live?.name).toBe('Other');
+    expect(t.state.currentPreset).toBe(1);
+  });
+
+  it('reports NOT verified when the amp keeps playing something else', async () => {
+    const amp = twoSlots();
+    amp.live = [0x01, 0x00, ...capturedPreset0Payload().slice(2)];
+    amp.ignoreWrites = true;
+    const { t } = await connected(amp);
+    const result = await t.switchPreset(1, 8);
+    expect(result.verified).toBe(false);
+    expect(result.differences.length).toBeGreaterThan(0);
+    expect(t.state.currentPreset).toBeNull();
+  });
+
+  it('rejects slots outside the amp’s slot count', async () => {
+    const { amp, t } = await connected();
+    await expect(t.switchPreset(8, 8)).rejects.toThrow(/outside 0–7/);
+    expect(amp.received).toHaveLength(0);
+  });
+});
+
+describe('tone editing (0x0104, 0x0115)', () => {
+  const withLive = (): FakeAmp => {
+    const amp = new FakeAmp();
+    amp.live = [0x01, 0x00, ...capturedPreset0Payload().slice(2)];
+    return amp;
+  };
+  const ampName = (): string => parsePreset(capturedPreset0Payload()).effects[3].name;
+
+  it('sends a knob change with trailing 0x00 and verifies it by reading live state', async () => {
+    const { amp, t } = await connected(withLive());
+    await t.changeParam(ampName(), 0, 0.42);
+    expect(writes(amp, 0x04)[0].data.at(-1)).toBe(0x00);
+    const check = await t.verifyParam(ampName(), 0, 0.42);
+    expect(check).toMatchObject({ verified: true, expected: Math.fround(0.42), actual: Math.fround(0.42) });
+  });
+
+  it('reports a knob change NOT verified when the amp ignores it', async () => {
+    const amp = withLive();
+    amp.ignoreWrites = true;
+    const { t } = await connected(amp);
+    await t.changeParam(ampName(), 0, 0.42);
+    const check = await t.verifyParam(ampName(), 0, 0.42);
+    expect(check.verified).toBe(false);
+    expect(check.actual).not.toBeNull();
+  });
+
+  it('refuses a non-numeric knob value before sending', async () => {
+    const { amp, t } = await connected(withLive());
+    await expect(t.changeParam(ampName(), 0, Number.NaN)).rejects.toThrow(/not a number/);
+    expect(amp.received).toHaveLength(0);
+  });
+
+  it('turns a block off and verifies it', async () => {
+    const { amp, t } = await connected(withLive());
+    const reverb = parsePreset(capturedPreset0Payload()).effects[6];
+    const check = await t.setEffectEnabled(reverb.name, !reverb.enabled);
+    expect(writes(amp, 0x15)[0].data.at(-1)).toBe(0x00);
+    expect(check).toMatchObject({ verified: true, actual: !reverb.enabled });
+  });
+});
+
+describe('setEffectModel (0x0106)', () => {
+  it('changes a position’s model with a trailing 0x00 and verifies it by reading live state', async () => {
+    const amp = new FakeAmp();
+    amp.live = [0x01, 0x00, ...capturedPreset0Payload().slice(2)];
+    const { t } = await connected(amp);
+    const drive = parsePreset(capturedPreset0Payload()).effects[2].name;
+    const check = await t.setEffectModel(2, drive, 'SABdriver');
+    expect(writes(amp, 0x06)[0].data.at(-1)).toBe(0x00);
+    expect(check).toMatchObject({ verified: true, actual: 'SABdriver' });
+  });
+
+  it('reports NOT verified when the amp keeps the old model', async () => {
+    const amp = new FakeAmp();
+    amp.live = [0x01, 0x00, ...capturedPreset0Payload().slice(2)];
+    amp.ignoreWrites = true;
+    const { t } = await connected(amp);
+    const drive = parsePreset(capturedPreset0Payload()).effects[2].name;
+    expect(await t.setEffectModel(2, drive, 'SABdriver')).toMatchObject({ verified: false, actual: drive });
+  });
+});
+
+describe('amp-wide levels (0x0133 / 0x0233 / 0x0333)', () => {
+  it('builds the commands the official app sends: target byte, float, no trailing 0x00', () => {
+    // Bytes from the owner's snoop log: guitar 0x00 at 0.268988 → data 00 ca 3e 89 b8 dc.
+    const logged = new DataView(new Uint8Array([0x3e, 0x89, 0xb8, 0xdc]).buffer).getFloat32(0);
+    expect(commands.setVolume(VOLUME.guitar, logged).data).toEqual([0x00, 0xca, 0x3e, 0x89, 0xb8, 0xdc]);
+    expect(commands.setVolume(VOLUME.master, 1).data).toEqual([0x09, 0xca, 0x3f, 0x80, 0x00, 0x00]);
+    expect(commands.getVolume(VOLUME.music)).toEqual({ cmd: 0x02, sub: 0x33, data: [0x05] });
+  });
+
+  it('reads a level by matching the reply seq', async () => {
+    const { t } = await connected();
+    expect(await t.readVolume(VOLUME.master)).toBe(Math.fround(0.53));
+  });
+
+  it('sets a level and verifies it by reading back', async () => {
+    const { amp, t } = await connected();
+    await t.changeVolume(VOLUME.guitar, 0.7);
+    expect(writes(amp, 0x33)[0].data).toEqual(commands.setVolume(0x00, 0.7).data);
+    expect(await t.verifyVolume(VOLUME.guitar, 0.7)).toMatchObject({ verified: true });
+  });
+
+  it('reports NOT verified when the amp ignores it', async () => {
+    const amp = new FakeAmp();
+    amp.ignoreWrites = true;
+    const { t } = await connected(amp);
+    await t.changeVolume(VOLUME.music, 0.8);
+    expect(await t.verifyVolume(VOLUME.music, 0.8)).toMatchObject({ verified: false, actual: 0 });
+  });
+
+  it('tracks the MASTER VOL knob from 0x0333 [0x09, float]', async () => {
+    const { amp, t } = await connected();
+    amp.notify(buildChunk(0x03, 0x33, [0x09, 0xca, 0x3f, 0x00, 0x00, 0x00], 0x50));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(t.state.volumes[VOLUME.master]).toBe(0.5);
   });
 });
 

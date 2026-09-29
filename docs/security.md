@@ -37,6 +37,23 @@ Rules:
 - Never hardcode, log, or echo a secret — including in tests and error messages.
 - Positive Grid account integration is not currently a task. Any work touching it requires owner approval first.
 
+## 2a. Tone assistant (AI)
+
+- Uses the **browser's built-in on-device model** (Chrome Prompt API). No API key, no account, no network call: prompts and answers stay on the PC.
+- AI output is untrusted input. Every suggestion goes through `checkSuggestion` (`src/app/tone-ai.ts`): models limited to those read from this amp, values type-checked and clamped, master volume excluded, `validatePreset` with known models. It is only ever played in the temporary buffer `0x7f`, never written to a slot. See `docs/ai-tone-assistant.md`.
+- If a cloud AI service is ever considered instead, that means a secret (API key) and data leaving the device, so it needs a new decision by the owner first.
+
+## 2c. ToneCloud
+
+- Unofficial Positive Grid API, called directly from the browser (no proxy), without credentials or cookies. Only user-initiated searches and fetches; no bulk downloading or redistribution.
+- A ToneCloud preset is untrusted input: `cloudToPreset` type-checks it, and it may only be tried or saved if every model is on the Spark 2 list or confirmed on the connected amp. It is only played in the temporary buffer `0x7f`.
+- Creator profile data is not shown or stored.
+
+## 2b. Model changes
+
+- The model picker sends any model on the Spark 2 list (`src/spark/catalog.ts`) without a warning: **owner decision, 2026-09-28**, after every untried model they tried worked on the LIVE. Accepted residual risk: a model the amp lacks can freeze it until power-off (SparklingTones, Spark 2).
+- AI suggestions and saved tones stay limited to models confirmed on the connected amp.
+
 ## 3. Privacy and compliance
 
 - No personal data of other people is handled. No compliance regime (SOC 2, GDPR, etc.) applies to this personal project.

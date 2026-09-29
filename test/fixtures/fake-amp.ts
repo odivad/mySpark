@@ -10,11 +10,17 @@ import {
   CMD_ACTION,
   CMD_NOTIFY,
   CMD_QUERY,
+  LIVE_TARGET,
   MessageAssembler,
+  Reader,
   SOFTWARE_PRESET,
+  type Preset,
   type SparkMessage,
   assemblePresetPayload,
   buildChunk,
+  encFloat,
+  parsePreset,
+  serializePreset,
   splitPresetIntoChunks,
 } from '../../src/spark/protocol.js';
 import type {
@@ -37,6 +43,10 @@ export class FakeAmp {
   /** What 0x0201 [0x01, 0x00] returns. */
   live: number[] | null = null;
   looperSettings: number[];
+  /** Presets in other banks (e.g. CH2 `3:n`, `4:0`), by "bank:number". */
+  readonly banks = new Map<string, number[]>();
+  /** Levels by 0x0133 target. */
+  volumes: Record<number, number> = { 0x00: 0.25, 0x05: 0, 0x09: 0.53 };
 
   /** ACK every chunk but don't store anything, like the Spark 2 does with a malformed preset. */
   ignoreWrites = false;
@@ -148,7 +158,8 @@ export class FakeAmp {
     if (m.cmd === CMD_QUERY && m.sub === 0x01) {
       if (this.silent) return;
       const [bank, number] = m.data;
-      const payload = bank === 0x01 ? this.live : this.slots.get(number);
+      const payload =
+        this.banks.get(`${bank}:${number}`) ?? (bank === 0x01 ? this.live : bank === 0x00 ? this.slots.get(number) : undefined);
       if (payload) this.sendPreset(payload, m.seq);
     } else if (m.cmd === CMD_QUERY && m.sub === 0x76) {
       if (!this.silent) this.reply(CMD_NOTIFY, 0x76, this.looperSettings, m.seq);
@@ -157,12 +168,55 @@ export class FakeAmp {
     } else if (m.cmd === CMD_ACTION && m.sub === 0x38) {
       const target = m.data[1];
       const payload = target === SOFTWARE_PRESET ? this.softwareBuffer : this.slots.get(target);
-      if (payload) this.live = [0x01, 0x00, ...payload.slice(2)];
+      if (payload && !this.ignoreWrites) this.live = [0x01, 0x00, ...payload.slice(2)];
       this.reply(CMD_ACK, 0x38, [], m.seq);
+    } else if (m.cmd === CMD_ACTION && m.sub === 0x04) {
+      // Knob change: no ACK (SOURCED: soundshed). [prefixed name, param, float, 0x00]
+      const r = new Reader(m.data);
+      const name = r.prefixedString();
+      const index = r.int();
+      const value = r.float();
+      this.editLive((p) => {
+        const param = p.effects.find((e) => e.name === name)?.params.find((q) => q.index === index);
+        if (param) param.value = value;
+      });
+    } else if (m.cmd === CMD_ACTION && m.sub === 0x15) {
+      const r = new Reader(m.data);
+      const name = r.prefixedString();
+      const on = r.bool();
+      this.editLive((p) => {
+        const effect = p.effects.find((e) => e.name === name);
+        if (effect) effect.enabled = on;
+      });
+      this.reply(CMD_ACK, 0x15, [], m.seq);
+    } else if (m.cmd === CMD_ACTION && m.sub === 0x06) {
+      const r = new Reader(m.data);
+      const from = r.prefixedString();
+      const to = r.prefixedString();
+      this.editLive((p) => {
+        const effect = p.effects.find((e) => e.name === from);
+        if (effect) effect.name = to;
+      });
+      this.reply(CMD_ACK, 0x06, [], m.seq);
+    } else if (m.cmd === CMD_QUERY && m.sub === 0x33) {
+      if (!this.silent) this.reply(CMD_NOTIFY, 0x33, encFloat(this.volumes[m.data[0]] ?? 0), m.seq);
+    } else if (m.cmd === CMD_ACTION && m.sub === 0x33) {
+      // No ACK, like the LIVE in the official app's log.
+      const r = new Reader(m.data);
+      const target = r.int();
+      const value = r.float();
+      if (!this.ignoreWrites) this.volumes[target] = value;
     } else if (m.cmd === CMD_ACTION && m.sub === 0x76) {
       if (!this.ignoreWrites) this.looperSettings = m.data;
       this.reply(CMD_ACK, 0x76, [], m.seq);
     }
+  }
+
+  private editLive(change: (preset: Preset) => void): void {
+    if (this.ignoreWrites || !this.live) return;
+    const preset = parsePreset(this.live);
+    change(preset);
+    this.live = serializePreset(preset, LIVE_TARGET);
   }
 
   private receiveUploadChunk(m: SparkMessage): void {
