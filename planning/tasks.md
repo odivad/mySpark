@@ -14,6 +14,11 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 ## Goal: working controller
 
 - [x] Test SparklingTones in Chrome on the Android phone with the Spark LIVE → accept ADR-0004 (PWA)
+- [x] Android as a standalone native APK (Capacitor + native BLE adapter; owner request 2026-09-29) — built and installed on the tablet
+- [x] UI restyled to Material 3 (baseline colour scheme, plain CSS, no library; owner request 2026-09-29); Settings → Theme: Light / Dark / System
+- [x] My tones: Import + merge (deletions kept as tombstones) and short-term History with Restore (owner 2026-09-29)
+- [ ] My tones: OneDrive sync (app folder, sign-in with the owner's Microsoft account; approved 2026-09-29) — waiting for the owner's app registration (client ID)
+- [ ] Hardware-test the APK on the Spark LIVE: connect, read presets, switch, one knob edit (owner)
 - [ ] Capture real frames from the owner's **Spark GO** and **Spark LIVE** (read-only) to use as verified test vectors — LIVE: 3 captures in `captures/` (notifications, knob map); LIVE preset-read vectors and all of the GO still to do
 - [ ] Make slot count per-model (`SlotIndex` 0–7 is VERIFIED-HW for Spark LIVE; Spark GO has 4 — SOURCED)
 

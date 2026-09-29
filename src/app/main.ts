@@ -5,6 +5,10 @@
  */
 import { BANK, CHAIN_CH2, CMD_NOTIFY, NOTE_NAMES, Reader, SOFTWARE_PRESET, VOLUME, type VolumeName, parseTunerReading, tunerCents, type Preset, type SparkMessage, slotLabel, validatePreset } from '../spark/protocol.js';
 import { SparkTransport, type SlotRead } from '../spark/transport.js';
+import { presetDifferences } from '../spark/verify.js';
+import { isNativeApp, nativeBluetooth } from './native-ble.js';
+import { initColorSetting, initThemeSetting } from './theme.js';
+import { HISTORY_DAYS, HISTORY_MAX, buildLibrary, mergeLibraries, parseLibrary, planRestore } from './tone-sync.js';
 import {
   AMP_BLOCK,
   LIVE_SLOT_COUNT,
@@ -20,9 +24,9 @@ import {
 import { aiAvailability, generate, warmUp } from './browser-ai.js';
 import { startDevReload } from './dev-reload.js';
 import { type CloudOrder, type CloudSummary, fetchPreset, searchPresets, sortResults } from './tonecloud.js';
-import { type CheckedSuggestion, type Instrument, type ModelPalette, buildPalette, buildPrompt, checkSuggestion, mergePalettes, paletteModels, parseAnswer, suggestionSchema } from './tone-ai.js';
+import { type CheckedSuggestion, type Instrument, type ModelPalette, alignToAmp, buildPalette, buildPrompt, checkSuggestion, mergePalettes, paletteModels, parseAnswer, suggestionSchema } from './tone-ai.js';
 import { MODEL_INFO, SPARK2_MODELS, describeModel, knobName, modelName } from '../spark/catalog.js';
-import { type SavedTone, addKnownBlocks, deleteTone, getKnownBlocks, getSeenModels, listTones, saveTone } from './tone-db.js';
+import { type SavedTone, addKnownBlocks, applyMerge, applyRestore, deleteTone, getDeleted, getHistory, getKnownBlocks, getSeenModels, listTones, saveTone } from './tone-db.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -162,6 +166,8 @@ function setMessage(text: string, kind: 'info' | 'ok' | 'warn' = 'info'): void {
 }
 
 const transport = new SparkTransport({
+  // Android APK: the native BLE plugin; the browser: navigator.bluetooth.
+  bluetooth: nativeBluetooth() ?? undefined,
   onStatus: (status, detail) => {
     document.body.dataset.connection = status;
     if (status === 'disconnected' && tunerOpen) {
@@ -475,11 +481,18 @@ async function rememberModels(): Promise<void> {
   }
 }
 
+/** The preset as it goes to the amp: params this amp doesn't report for a model are left out (alignToAmp). */
+function forAmp(preset: Preset): Preset {
+  const aligned = alignToAmp(preset, palette());
+  if (aligned.dropped.length) log(`not sent (the amp doesn't report them): ${aligned.dropped.join('; ')}`);
+  return aligned.preset;
+}
+
 /** Plays a preset from the temporary buffer (verified). No saved slot changes. */
 async function playInBuffer(preset: Preset, label: string, key: string | null = null): Promise<void> {
   await userAction(async () => {
     setMessage(`Loading "${label}" into the temporary buffer…`);
-    const r = await transport.loadPreset(preset, (i, n) => setMessage(`Loading "${label}" — ${i + 1}/${n}…`));
+    const r = await transport.loadPreset(forAmp(preset), (i, n) => setMessage(`Loading "${label}" — ${i + 1}/${n}…`));
     bufferName = label;
     playingKey = r.sent ? key : playingKey;
     if (r.readBack) applyLive(r.readBack);
@@ -615,7 +628,7 @@ async function saveToSlot(tone: SavedTone, slot: number): Promise<void> {
       preset: before,
     });
     setMessage(`Saving "${tone.name}" to ${label}…`);
-    const r = await transport.storePreset(tone.preset, slot, profile.slotCount, (i, n) => setMessage(`Saving to ${label} — ${i + 1}/${n}…`));
+    const r = await transport.storePreset(forAmp(tone.preset), slot, profile.slotCount, (i, n) => setMessage(`Saving to ${label} — ${i + 1}/${n}…`));
     if (r.readBack) slots = slots.map((x) => (x.slot === slot ? { slot, preset: r.readBack } : x));
     bufferName = null;
     playingKey = null;
@@ -643,12 +656,79 @@ function slotPicker(tone: SavedTone, actions: HTMLElement): void {
   renderControls();
 }
 
-function exportTones(): void {
-  const data = { format: 'myspark-tones', version: 1, exportedAt: new Date().toISOString(), tones };
+async function exportTones(): Promise<void> {
+  if (isNativeApp()) {
+    // The APK's WebView has no file downloads (Capacitor 8 doesn't handle them).
+    setMessage('Export is not available in the Android app yet. Export on the PC and Import here; OneDrive sync is next.', 'warn');
+    return;
+  }
+  const data = buildLibrary(tones, await getDeleted());
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = el('a', { href: URL.createObjectURL(blob), download: `myspark-tones-${data.exportedAt.slice(0, 10)}.json` });
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/** Import: merges a tones file (from Export on another device) into this device's My tones. Nothing goes to the amp. */
+async function importTones(file: File): Promise<void> {
+  try {
+    const { library, skipped } = parseLibrary(await file.text());
+    const merge = mergeLibraries({ tones, deleted: await getDeleted() }, library);
+    await applyMerge(merge, `before importing "${file.name}"`);
+    await refreshTones();
+    const parts = [`${merge.added.length} new tone${merge.added.length === 1 ? '' : 's'}`];
+    if (merge.removed.length) parts.push(`${merge.removed.length} removed (deleted on the other device)`);
+    if (skipped) parts.push(`${skipped} skipped (not readable)`);
+    setMessage(`Imported "${file.name}": ${parts.join(', ')}.`, skipped ? 'warn' : 'ok');
+  } catch (err) {
+    setMessage(`Not imported — "${file.name}": ${(err as Error).message}.`, 'warn');
+  }
+}
+
+/** History dialog: recent versions of My tones, each restorable. */
+async function openHistory(): Promise<void> {
+  const list = $('history-list');
+  const history = await getHistory();
+  const current = new Set(tones.map((t) => t.id));
+  list.replaceChildren(
+    ...(history.length
+      ? history.map((snap) => {
+          const gone = snap.tones.filter((t) => !current.has(t.id)).length;
+          const extra = tones.filter((t) => !snap.tones.some((x) => x.id === t.id)).length;
+          const diff = gone || extra ? `${gone ? `${gone} back` : ''}${gone && extra ? ', ' : ''}${extra ? `${extra} removed` : ''} if restored` : 'same as now';
+          return el(
+            'li',
+            { class: 'history-item' },
+            el(
+              'div',
+              {},
+              el('div', { class: 'history-when' }, new Date(snap.takenAt).toLocaleString()),
+              el('div', { class: 'meta' }, `${snap.reason} · ${snap.tones.length} tone${snap.tones.length === 1 ? '' : 's'} · ${diff}`),
+            ),
+            button('Restore', () => void restoreSnapshot(snap.id)),
+          );
+        })
+      : [el('li', { class: 'empty-note' }, 'No earlier versions yet. One is kept before every save, delete or import.')]),
+  );
+  $('history').hidden = false;
+  $('history-close').focus();
+}
+
+async function restoreSnapshot(id: string): Promise<void> {
+  const snap = (await getHistory()).find((s) => s.id === id);
+  if (!snap) return;
+  const plan = planRestore(tones, snap, () => crypto.randomUUID());
+  if (!plan.add.length && !plan.removeIds.length) {
+    setMessage('That version is the same as My tones now.', 'info');
+    return;
+  }
+  if (!confirm(`Go back to My tones from ${new Date(snap.takenAt).toLocaleString()}?
+
+${plan.add.length} tone(s) come back, ${plan.removeIds.length} removed. The current version is kept in History.`)) return;
+  await applyRestore(snap, plan);
+  await refreshTones();
+  $('history').hidden = true;
+  setMessage(`My tones restored to ${new Date(snap.takenAt).toLocaleString()}: ${plan.add.length} back, ${plan.removeIds.length} removed.`, 'ok');
 }
 
 /** True when this card's tone is what the amp is playing from the temporary buffer. */
@@ -733,7 +813,7 @@ function renderTones(): void {
             })(),
             button('Delete', () => {
               if (!confirm(`Delete "${t.name}" from My tones?`)) return;
-              void deleteTone(t.id).then(refreshTones);
+              void deleteTone(t.id, t.name).then(refreshTones);
             }),
           ],
           isPlaying(`tone:${t.id}`) ? 'playing' : '',
@@ -1212,6 +1292,22 @@ function renderInfo(): void {
   $('info').textContent = [s.name, s.serial && `serial ${s.serial}`].filter(Boolean).join(' · ');
 }
 
+/**
+ * Blinks the lit preset's LED while the live sound differs from that slot as last read from the
+ * amp (edited, not saved), like the panel LED on the owner's amps (owner request 2026-09-29).
+ * Compared with presetDifferences, so the Spark GO's hidden on/off params don't count. No blink
+ * when the live sound isn't known (the GO's saved-copy stand-in).
+ */
+function markEdited(): void {
+  const current = channel === 2 ? transport.state.ch2Preset : transport.state.currentPreset;
+  const saved = (channel === 2 ? ch2Slots : slots).find((x) => x.slot === current)?.preset;
+  const now = channel === 2 ? ch2Live : liveIsSavedCopy ? null : live;
+  const edited = !!saved && !!now && presetDifferences(saved, now).length > 0;
+  for (const led of document.querySelectorAll('#slots .slot .led')) {
+    led.classList.toggle('edited', edited && led.parentElement?.getAttribute('aria-pressed') === 'true');
+  }
+}
+
 function renderSlots(): void {
   const list = $('slots');
   list.replaceChildren();
@@ -1234,6 +1330,7 @@ function renderSlots(): void {
       );
     }
     renderControls();
+    markEdited();
     return;
   }
   for (let slot = 0; slot < profile.slotCount; slot++) {
@@ -1250,6 +1347,7 @@ function renderSlots(): void {
     list.append(button);
   }
   renderControls();
+  markEdited();
 }
 
 function liveLabel(): string {
@@ -1305,6 +1403,7 @@ function updateBlockView(block: number): void {
   view.root.classList.toggle('off', !effect.enabled);
   view.label.textContent = effect.enabled ? 'on' : 'off';
   view.toggle.setAttribute('aria-pressed', String(effect.enabled));
+  markEdited();
 }
 
 function updateParamView(block: number, index: number, fromAmp: boolean, status?: 'pending' | 'ok' | 'bad'): void {
@@ -1331,9 +1430,11 @@ function updateParamView(block: number, index: number, fromAmp: boolean, status?
     view.status.dataset.state = 'amp';
     view.status.textContent = '';
   }
+  markEdited();
 }
 
 function renderLive(): void {
+  markEdited();
   const out = $('live');
   const ampBox = $('amp');
   out.replaceChildren();
@@ -1498,6 +1599,49 @@ try {
 $('connect').addEventListener('click', () => void connect());
 $('tuner-btn').addEventListener('click', () => void openTuner());
 $('tuner-close').addEventListener('click', () => void closeTuner());
+
+// Pedal knobs: hidden by default, so the chain is a row of footswitches (owner, 2026-09-29: "its more
+// common to turn pedals on and off. less often do you have to tweak their settings"). The Amp keeps its knobs.
+function showKnobs(show: boolean): void {
+  document.body.dataset.knobs = show ? 'shown' : 'hidden';
+  const btn = $('knobs-toggle');
+  btn.setAttribute('aria-pressed', String(show));
+  btn.textContent = show ? 'Hide knobs' : 'Show knobs';
+  try {
+    localStorage.setItem('myspark.knobs', show ? 'shown' : 'hidden');
+  } catch {
+    // storage unavailable: the choice just isn't remembered
+  }
+}
+{
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('myspark.knobs');
+  } catch {
+    // storage unavailable
+  }
+  showKnobs(saved === 'shown');
+  $('knobs-toggle').addEventListener('click', () => showKnobs(document.body.dataset.knobs !== 'shown'));
+}
+
+// Settings dialog (theme, colour).
+initThemeSetting($('theme'));
+initColorSetting($('color'));
+const closeSettings = () => {
+  $('settings').hidden = true;
+  $('settings-btn').focus();
+};
+$('settings-btn').addEventListener('click', () => {
+  $('settings').hidden = false;
+  $('theme').querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
+});
+$('settings-close').addEventListener('click', closeSettings);
+$('settings').addEventListener('click', (e) => {
+  if (e.target === $('settings')) closeSettings();
+});
+$('settings').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSettings();
+});
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && tunerOpen) void closeTuner();
 });
@@ -1517,7 +1661,23 @@ $('ai-form').addEventListener('submit', (e) => {
   e.preventDefault();
   void suggest();
 });
-$('export-tones').addEventListener('click', exportTones);
+$('export-tones').addEventListener('click', () => void exportTones());
+$('history-btn').addEventListener('click', () => void openHistory());
+$('history-close').addEventListener('click', () => ($('history').hidden = true));
+$('history').addEventListener('click', (e) => {
+  if (e.target === $('history')) $('history').hidden = true;
+});
+$('history').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') $('history').hidden = true;
+});
+$('history-note').textContent = `The last ${HISTORY_MAX} versions from the past ${HISTORY_DAYS} days, on this device.`;
+$('import-tones').addEventListener('click', () => $<HTMLInputElement>('import-file').click());
+$<HTMLInputElement>('import-file').addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (file) void importTones(file);
+});
 $('log-copy').addEventListener('click', () => {
   const text = [...$('log').children].map((line) => line.textContent ?? '').join('\n');
   navigator.clipboard.writeText(text).then(
@@ -1538,7 +1698,7 @@ document
   .querySelectorAll<HTMLButtonElement>('#channel button')
   .forEach((b) => b.addEventListener('click', () => void selectChannel(b.dataset.ch === '2' ? 2 : 1)));
 
-if (!('bluetooth' in navigator)) {
+if (!isNativeApp() && !('bluetooth' in navigator)) {
   setMessage('This browser has no Web Bluetooth. Use Chrome or Edge on the PC, or Chrome on Android.', 'warn');
   $<HTMLButtonElement>('connect').disabled = true;
 }
@@ -1571,13 +1731,14 @@ if (['localhost', '127.0.0.1'].includes(location.hostname) && new URLSearchParam
     .catch((err: Error) => log(`demo preview unavailable: ${err.message}`));
 }
 
-startDevReload(
+if (!isNativeApp()) startDevReload(
   () => transport.connected,
   () => {
     toast(['Update ready (dev) — reloading disconnects the amp. ', button('Reload', () => location.reload())], 'info', true);
   },
 );
 
-if ('serviceWorker' in navigator) {
+// Not in the APK: the app ships inside it, and a service worker there would only serve stale copies.
+if (!isNativeApp() && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch((err: Error) => log(`service worker not registered: ${err.message}`));
 }

@@ -5,13 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>mySpark</title>
 <meta name="description" content="Personal controller for Spark amps over Bluetooth.">
-<meta name="theme-color" content="#121212">
+<meta name="theme-color" content="#f3edf7">
+<script>
+  // Theme picked in Settings, applied before the page draws (theme.ts owns it; "system" = no attribute).
+  try {
+    var t = localStorage.getItem('myspark.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+    var c = localStorage.getItem('myspark.color'); if (c && /^[a-z]+$/.test(c)) document.documentElement.dataset.color = c;
+  } catch (e) {}
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="app.css">
 </head>
-<body data-connection="disconnected">
+<body data-connection="disconnected" data-knobs="hidden">
 
 <header class="topbar">
   <div class="brand">
@@ -25,6 +32,7 @@
       <div id="info"></div>
     </div>
     <button id="tuner-btn" disabled title="The amp's built-in tuner">Tuner</button>
+    <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">⚙</button>
     <button id="connect" class="primary">Connect</button>
     <button id="disconnect" hidden>Disconnect</button>
   </div>
@@ -56,7 +64,7 @@
     <section id="tab-tone" class="tab" role="tabpanel">
       <div class="tab-head">
         <h2>Playing now <span id="live-name" class="sub"></span></h2>
-        <span><button id="revert" disabled title="Throw away unsaved changes: load the saved preset again">Revert to saved</button> <button id="save-current" disabled>Save to My tones</button></span>
+        <span><button id="knobs-toggle" aria-pressed="false" title="Pedal knobs: hidden by default, since pedals are switched on and off far more often than adjusted">Show knobs</button> <button id="revert" disabled title="Throw away unsaved changes: load the saved preset again">Revert to saved</button> <button id="save-current" disabled>Save to My tones</button></span>
       </div>
       <div id="amp" class="amp-slot"></div>
       <div id="live" class="chain"></div>
@@ -107,8 +115,9 @@
 
     <section id="tab-tones" class="tab" role="tabpanel" hidden>
       <div class="tab-head">
-        <h2>My tones <span class="sub">saved in this browser</span></h2>
-        <button id="export-tones" disabled>Export</button>
+        <h2>My tones <span class="sub">saved on this device</span></h2>
+        <span><button id="history-btn" title="Earlier versions of My tones, kept before every change">History</button> <button id="import-tones" title="Add tones from a file exported on another device">Import</button> <button id="export-tones" disabled title="Save My tones to a file, to import on another device">Export</button></span>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
       </div>
       <div id="tones" class="cards"></div>
     </section>
@@ -135,6 +144,41 @@
     <div id="tuner-cents" class="tuner-cents">Play a string</div>
     <div class="tuner-strings">E · A · D · G · B · E</div>
     <p class="note">The amp's own tuner; the amp may be muted while it's on. Closing turns it off.</p>
+  </div>
+</div>
+
+<div id="settings" class="settings-overlay" hidden>
+  <div class="settings-box" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+    <div>
+      <h3 id="theme-label">Theme</h3>
+      <div id="theme" class="seg" role="group" aria-labelledby="theme-label">
+        <button data-theme="light" aria-pressed="false">Light</button>
+        <button data-theme="dark" aria-pressed="false">Dark</button>
+        <button data-theme="system" aria-pressed="true">System</button>
+      </div>
+    </div>
+    <div>
+      <h3 id="color-label">Colour</h3>
+      <div id="color" class="swatches" role="group" aria-labelledby="color-label">
+        <button class="swatch" data-color="purple" style="--sw:#6750a4" title="Purple (Material default)" aria-label="Purple" aria-pressed="true"></button>
+        <button class="swatch" data-color="red" style="--sw:#d32f2f" title="Red" aria-label="Red" aria-pressed="false"></button>
+        <button class="swatch" data-color="orange" style="--sw:#f57c00" title="Orange" aria-label="Orange" aria-pressed="false"></button>
+        <button class="swatch" data-color="green" style="--sw:#2e7d32" title="Green" aria-label="Green" aria-pressed="false"></button>
+        <button class="swatch" data-color="blue" style="--sw:#1565c0" title="Blue" aria-label="Blue" aria-pressed="false"></button>
+        <button class="swatch" data-color="teal" style="--sw:#00897b" title="Teal" aria-label="Teal" aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="settings-actions"><button id="settings-close">Done</button></div>
+  </div>
+</div>
+
+<div id="history" class="settings-overlay" hidden>
+  <div class="settings-box history-box" role="dialog" aria-modal="true" aria-labelledby="history-title">
+    <h2 id="history-title">My tones history</h2>
+    <p id="history-note" class="note"></p>
+    <ul id="history-list" class="history-list"></ul>
+    <div class="settings-actions"><button id="history-close">Close</button></div>
   </div>
 </div>
 

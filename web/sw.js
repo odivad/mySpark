@@ -1,6 +1,6 @@
 // mySpark service worker: makes the app installable and usable offline.
 // Network first, so a rebuilt app shows up on the next load; the cache is the offline fallback.
-const CACHE = 'myspark-v5';
+const CACHE = 'myspark-v7';
 const SHELL = [
   './',
   './index.html',
@@ -15,6 +15,9 @@ const SHELL = [
   './js/app/tone-db.js',
   './js/app/dev-reload.js',
   './js/app/tonecloud.js',
+  './js/app/theme.js',
+  './js/app/tone-sync.js',
+  './js/app/native-ble.js',
   './js/spark/protocol.js',
   './js/spark/transport.js',
   './js/spark/verify.js',
