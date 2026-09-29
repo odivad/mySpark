@@ -309,7 +309,7 @@ async function connect(): Promise<void> {
     renderLive();
     const ok = slots.filter((s) => s.preset).length;
     const good = ok === profile.slotCount && live !== null;
-    const tail = profile.canWrite ? '' : profile.canSwitch ? ` ${profile.label}: preset switching only for now.` : ` ${profile.label}: view only for now.`;
+    const tail = profile.canWrite ? '' : profile.canUpload ? ` ${profile.label}: presets, Try, Save to amp and tuner; knob edits not yet.` : ` ${profile.label}: view only for now.`;
     setMessage((good ? 'Ready.' : `Read ${ok} of ${profile.slotCount} presets${live ? '' : ', live sound unreadable'}.`) + tail, good ? 'ok' : 'warn');
   });
 }
@@ -532,16 +532,83 @@ async function refreshTones(): Promise<void> {
   renderTones();
 }
 
-/** A saved tone may only use models this amp is known to have. */
-async function applySaved(tone: SavedTone): Promise<void> {
+/** A saved tone may only use models this amp is known to have. Returns the problems, if any. */
+async function toneProblems(tone: SavedTone): Promise<string[]> {
   const device = transport.deviceName;
-  const known = new Set([...paletteModels(palette()), ...(device ? await getSeenModels(device) : seenModels)]);
-  const { errors } = validatePreset(tone.preset, known);
+  const known = new Set([...paletteModels(palette()), ...(device ? await getSeenModels(device) : seenModels), ...SPARK2_MODELS.flat()]);
+  return validatePreset(tone.preset, known).errors;
+}
+
+async function applySaved(tone: SavedTone): Promise<void> {
+  const errors = await toneProblems(tone);
   if (errors.length) {
-    setMessage(`Not applied — "${tone.name}": ${errors.slice(0, 2).join('; ')}`, 'warn');
+    setMessage(`Not played — "${tone.name}": ${errors.slice(0, 2).join('; ')}`, 'warn');
     return;
   }
   await playInBuffer(tone.preset, tone.name, `tone:${tone.id}`);
+}
+
+/**
+ * Saves a tone into a saved slot on the amp (owner request 2026-09-29: "a try on my tones then a
+ * save to HW"). The slot's current content is read from the amp and kept in My tones first, then
+ * the slot is written (SparkTransport.storePreset: 0x0101 to the slot + switch away and back) and
+ * read back to confirm. Spark LIVE and GO (profile.canUpload).
+ */
+async function saveToSlot(tone: SavedTone, slot: number): Promise<void> {
+  const label = slotLabel(slot).label;
+  const errors = await toneProblems(tone);
+  if (errors.length) {
+    setMessage(`Not saved — "${tone.name}": ${errors.slice(0, 2).join('; ')}`, 'warn');
+    return;
+  }
+  const current = slots.find((x) => x.slot === slot)?.preset;
+  const ok = confirm(
+    `Overwrite ${label}${current ? ` ("${current.name}")` : ''} on the amp with "${tone.name}"?\n\n` +
+      `The current ${label} is read from the amp and kept in My tones first. The amp switches presets briefly while saving.`,
+  );
+  if (!ok) return;
+  await userAction(async () => {
+    setMessage(`Backing up ${label}…`);
+    const before = await transport.readPreset(slot);
+    if (!before) {
+      setMessage(`Not saved: couldn't read ${label} from the amp to back it up first.`, 'warn');
+      return;
+    }
+    await saveTone({
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      name: `${label} backup — ${before.name}`,
+      description: `Slot ${label} as it was before "${tone.name}" was saved there.`,
+      source: 'amp',
+      preset: before,
+    });
+    setMessage(`Saving "${tone.name}" to ${label}…`);
+    const r = await transport.storePreset(tone.preset, slot, profile.slotCount, (i, n) => setMessage(`Saving to ${label} — ${i + 1}/${n}…`));
+    if (r.readBack) slots = slots.map((x) => (x.slot === slot ? { slot, preset: r.readBack } : x));
+    bufferName = null;
+    playingKey = null;
+    await refreshTones();
+    renderSlots();
+    if (r.verified) setMessage(`"${tone.name}" saved to ${label} — confirmed by the amp. The old ${label} is in My tones.`, 'ok');
+    else setMessage(`Save to ${label} not confirmed: ${r.differences.slice(0, 3).join('; ') || r.error || 'no read-back'}. The old ${label} is in My tones.`, 'warn');
+  });
+  void refreshLive();
+}
+
+/** Inline slot picker on a My tones card. */
+function slotPicker(tone: SavedTone, actions: HTMLElement): void {
+  const select = el(
+    'select',
+    { 'aria-label': 'Slot to save to' },
+    ...Array.from({ length: profile.slotCount }, (_, n) => {
+      const name = slots.find((x) => x.slot === n)?.preset?.name;
+      return el('option', { value: String(n) }, `${slotLabel(n).label}${name ? ` — ${name}` : ''}`);
+    }),
+  );
+  const save = button('Save', () => void saveToSlot(tone, Number(select.value)), 'upload');
+  const cancel = button('Cancel', () => renderTones());
+  actions.replaceChildren(select, save, cancel);
+  renderControls();
 }
 
 function exportTones(): void {
@@ -578,8 +645,9 @@ function card(title: string, desc: string, meta: string, extra: Node[], actions:
   );
 }
 
-function button(label: string, onClick: () => void, needsAmp = false): HTMLButtonElement {
-  const b = el('button', needsAmp ? { 'data-needs-amp': '' } : {}, label);
+/** needs: true = any write to the amp; 'upload' = a whole-preset upload (allowed on the GO too). */
+function button(label: string, onClick: () => void, needs: boolean | 'upload' = false): HTMLButtonElement {
+  const b = el('button', needs === 'upload' ? { 'data-needs-upload': '' } : needs ? { 'data-needs-amp': '' } : {}, label);
   b.addEventListener('click', onClick);
   return b;
 }
@@ -600,7 +668,7 @@ function renderSuggestions(): void {
         s.summary.join(' · '),
         [],
         [
-          button('Try', () => void playInBuffer(preset, s.name, key), true),
+          button('Try', () => void playInBuffer(preset, s.name, key), 'upload'),
           button('Save', () => void storeTone({ name: s.name, description: s.description, source: 'ai', request: lastRequest, preset })),
         ],
         isPlaying(key) ? 'playing' : '',
@@ -623,7 +691,14 @@ function renderTones(): void {
           `${t.source === 'ai' ? `AI${t.request ? `: "${t.request}"` : ''}` : t.source === 'tonecloud' ? 'ToneCloud' : 'from the amp'} · ${new Date(t.createdAt).toLocaleString()}`,
           [],
           [
-            button('Apply', () => void applySaved(t), true),
+            button('Try', () => void applySaved(t), 'upload'),
+            (() => {
+              const b = button('Save to amp…', () => {
+                const actions = b.closest('.actions');
+                if (actions instanceof HTMLElement) slotPicker(t, actions);
+              }, 'upload');
+              return b;
+            })(),
             button('Delete', () => {
               if (!confirm(`Delete "${t.name}" from My tones?`)) return;
               void deleteTone(t.id).then(refreshTones);
@@ -729,7 +804,7 @@ function renderCloud(): void {
       const tryBtn = button('Try', async () => {
         const preset = await cloudPreset(s);
         if (preset) await playInBuffer(preset, s.name, `cloud:${s.id}`);
-      }, true);
+      }, 'upload');
       tryBtn.setAttribute('data-ch1-only', '');
       const save = button('Save', async () => {
         const preset = await cloudPreset(s);
@@ -1067,13 +1142,23 @@ function renderControls(): void {
   $<HTMLButtonElement>('connect').disabled = document.body.dataset.connection === 'connecting';
   $<HTMLButtonElement>('backup').disabled = !connected || !idle || slots.every((s) => !s.preset);
   const canSwitch = connected && profile.canSwitch;
+  $<HTMLButtonElement>('tuner-btn').disabled = !(connected && profile.hasTuner) || !idle;
   document.querySelectorAll<HTMLButtonElement>('#slots button').forEach((b) => (b.disabled = !canSwitch || !idle || channel === 2));
   for (const v of blockViews) v.toggle.disabled = !on || !idle;
   for (const v of paramViews.values()) if (v.input) v.input.disabled = !on || !idle;
   $<HTMLButtonElement>('save-current').disabled = !live || channel === 2;
   $<HTMLButtonElement>('ai-generate').disabled = !aiReady || aiRunning || !live || channel === 2;
   $<HTMLButtonElement>('export-tones').disabled = tones.length === 0;
-  document.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-needs-amp]').forEach((b) => (b.disabled = !on || !idle));
+  const why = connected && !profile.canWrite ? `Not available on the ${profile.label} yet — knob, on/off and model edits still need capturing` : '';
+  document.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-needs-amp]').forEach((b) => {
+    b.disabled = !on || !idle;
+    b.title = why;
+  });
+  const canUpload = connected && profile.canUpload;
+  document.querySelectorAll<HTMLButtonElement>('[data-needs-upload]').forEach((b) => {
+    b.disabled = !canUpload || !idle;
+    b.title = '';
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-ch1-only]').forEach((b) => (b.disabled = b.disabled || channel === 2));
   $<HTMLButtonElement>('tc-search').disabled = cloudBusy;
   $<HTMLButtonElement>('tc-more').hidden = !cloudMore;

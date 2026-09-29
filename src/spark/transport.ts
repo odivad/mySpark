@@ -97,6 +97,12 @@ export const CHAR_NOTIFY_UUID = 0xffc2;
 /** BLE name of the owner's Spark LIVE. VERIFIED-HW: Spark LIVE (owner screenshot, 2026-09-28). */
 export const SPARK_LIVE_NAME = 'Spark LIVE BLE';
 
+/** Preset upload chunk size for the Spark GO. VERIFIED-HW: official app on the owner's GO (128-byte 0x0101 chunks). */
+export const GO_PRESET_CHUNK_SIZE = 128;
+
+/** BLE write size for the GO's larger messages (a 128-byte chunk is ~173 bytes with the header). UNVERIFIED choice. */
+export const GO_BLE_WRITE_SIZE = 20;
+
 /** BLE name of the owner's Spark GO. VERIFIED-HW: Spark GO (mySpark log, 2026-09-28). */
 export const SPARK_GO_NAME = 'Spark GO BLE';
 
@@ -109,7 +115,23 @@ export const SPARK_GO_NAME = 'Spark GO BLE';
 export function writeAllowed(deviceName: string | null, command: SparkCommand): boolean {
   if (command.cmd !== CMD_ACTION) return true;
   if (deviceName === SPARK_LIVE_NAME) return true;
-  if (deviceName === SPARK_GO_NAME) return command.sub === 0x38 && command.data.length === 2 && command.data[0] === 0x00;
+  if (deviceName === SPARK_GO_NAME) {
+    // Preset switch: seen ACKed from the official app. Tuner on/off: the GO answers the tuner-state
+    // query 0x0265 in the official app's log (so it has one); 0x0165 itself is the LIVE's form,
+    // UNVERIFIED on the GO — the transport confirms it by reading 0x0265 back. Owner asked for it
+    // on the GO (2026-09-29).
+    // Preset upload 0x0101 and switch 0x0138, to the temporary buffer 0x7f (ToneCloud play) or a
+    // slot 0–3 (save): both seen from the official app on the owner's GO (snoop log 2026-09-29).
+    const target = (n: number): boolean => n === 0x7f || (n >= 0 && n <= 3);
+    if (command.sub === 0x38) return command.data.length === 2 && command.data[0] === 0x00 && target(command.data[1]);
+    if (command.sub === 0x01) {
+      // Chunk sub-header [total, index, size]; the first chunk starts with the target [bank, number].
+      const [, index] = command.data;
+      return index !== 0 || (command.data[3] === 0x00 && target(command.data[4]));
+    }
+    if (command.sub === 0x65) return command.data.length === 1 && (command.data[0] === 0xc2 || command.data[0] === 0xc3);
+    return false;
+  }
   return false;
 }
 
@@ -414,7 +436,11 @@ export class SparkTransport {
       );
     }
     const seq = options.seq ?? this.nextSeq();
-    const bytes = new Uint8Array(encode(command, seq, !!options.blockHeader));
+    // The Spark GO gets the 16-byte block header on every message, exactly as the official app
+    // sends it (owner's GO, HCI snoop log 2026-09-29: `01 fe 00 00 53 fe <len> 00…` before each
+    // F0 frame). Without it the GO answers reads but ignored a preset switch. The LIVE doesn't need it.
+    const withHeader = options.blockHeader ?? this.deviceName === SPARK_GO_NAME;
+    const bytes = new Uint8Array(encode(command, seq, withHeader));
     const step = options.writeSize ? Math.max(1, options.writeSize) : bytes.length;
 
     if (step > SAFE_WRITE_BYTES) {
@@ -735,7 +761,7 @@ export class SparkTransport {
     const differences = presetDifferences(slotPreset, live);
     const verified = differences.length === 0;
     if (verified) this.state.currentPreset = slot;
-    this.onLog(`switch to slot ${slot}: ${verified ? 'verified' : `NOT verified (${differences.length} differences)`}`);
+    this.onLog(`switch to slot ${slot}: ${verified ? 'verified' : `NOT verified — ${differences.join('; ')}`}`);
     return { verified, differences, slotPreset, live };
   }
 
@@ -892,7 +918,7 @@ export class SparkTransport {
     this.onLog(
       differences.length === 0
         ? `${label}: read-back matches — write verified`
-        : `${label}: read-back differs — write NOT verified (${differences.length} differences)`,
+        : `${label}: read-back differs — write NOT verified: ${differences.join('; ')}`,
     );
     return { ...upload, verified: differences.length === 0, differences, readBack };
   }
@@ -917,7 +943,10 @@ export class SparkTransport {
 
     // The two tail floats are not sent: create_preset doesn't write them (SparkIO.ino:1019).
     const payload = serializePreset(preset, target, { omitTail: !options.includeTail });
-    const chunks = splitPresetIntoChunks(payload, options.chunkSize);
+    // The Spark GO takes 128-byte chunks (official app on the owner's GO, 2026-09-29); the LIVE 25.
+    // Over BLE the GO's larger messages are split into 20-byte writes; the amp reassembles F0…F7.
+    const go = this.deviceName === SPARK_GO_NAME;
+    const chunks = splitPresetIntoChunks(payload, options.chunkSize ?? (go ? GO_PRESET_CHUNK_SIZE : undefined));
     const seq = this.nextSeq();
     this.onLog(
       `sending "${preset.name}" → bank ${payload[0]} number ${payload[1]}: ${payload.length} bytes in ${chunks.length} chunks, ` +
@@ -935,7 +964,7 @@ export class SparkTransport {
       try {
         await this.send(
           { cmd: CMD_ACTION, sub: 0x01, data: chunks[i] },
-          { seq: options.incrementSeq ? undefined : seq, blockHeader: options.blockHeader },
+          { seq: options.incrementSeq ? undefined : seq, blockHeader: options.blockHeader, writeSize: go ? GO_BLE_WRITE_SIZE : undefined },
         );
       } catch (err) {
         const error = `BLE error on chunk ${i + 1} of ${chunks.length}: ${(err as Error).message}`;

@@ -21,6 +21,10 @@ export interface AmpProfile {
   canWrite: boolean;
   /** Preset switching (0x0138) allowed even when other writes aren't (Spark GO). */
   canSwitch: boolean;
+  /** The built-in tuner (0x0165), allowed on its own on the GO. */
+  hasTuner: boolean;
+  /** Whole-preset uploads: Try (temporary buffer) and Save to amp (slot). */
+  canUpload: boolean;
 }
 
 /**
@@ -30,12 +34,12 @@ export interface AmpProfile {
  */
 export function profileFor(deviceName: string | null): AmpProfile {
   if (deviceName === 'Spark LIVE BLE') {
-    return { id: 'live', label: 'Spark LIVE', slotCount: LIVE_SLOT_COUNT, hasLevels: true, hasChannels: true, canWrite: true, canSwitch: true };
+    return { id: 'live', label: 'Spark LIVE', slotCount: LIVE_SLOT_COUNT, hasLevels: true, hasChannels: true, canWrite: true, canSwitch: true, hasTuner: true, canUpload: true };
   }
   if (deviceName === 'Spark GO BLE') {
-    return { id: 'go', label: 'Spark GO', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true };
+    return { id: 'go', label: 'Spark GO', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true, hasTuner: true, canUpload: true };
   }
-  return { id: 'unknown', label: deviceName ?? 'Spark', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: false };
+  return { id: 'unknown', label: deviceName ?? 'Spark', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: false, hasTuner: false, canUpload: false };
 }
 
 /** Chain position of the amp block. SOURCED: SparklingTones; VERIFIED-HW: Spark LIVE. */

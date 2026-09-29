@@ -188,8 +188,22 @@ Bug report pulled with `adb bugreport` (`captures/raw/`, git-ignored). `VERIFIED
 - **Same framing, same read commands, same preset format as the LIVE:** `0x0201 [0x00, n]` (the app pads to 7 bytes), `[0x01, 0x00]` for live; replies are 0x0301 chunks of 25 bytes with the `[total, index, size]` sub-header; presets have the **same 7-block chain** and model ids. The owner's four GO presets are bass tones on `GK800` (RB-800).
 - **The GO sometimes stops a preset reply after 13 chunks, with the official app too.** The app then asks again ~3 s later and gets all 14–16 chunks. **mySpark now does the same:** `SparkTransport` retries a reply that stops partway (up to 2 extra attempts). This was the "A4 / live sound unreadable" problem. **Owner test after the fix: "it reads"** — all four GO slots and the live sound load in mySpark. `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
 - **Preset switch `0x0138 [0x00, n]` → ACK `0x0438`**, used 5 times by the app: same as the LIVE.
+- **The official app wraps every message to the GO in the 16-byte block header** `01 fe 00 00 53 fe <total length> 00×9`, then the `F0 01 … F7` frame (the Spark 40 form soundshed documents). The snoop decoder had hidden it, since the assembler skips bytes before `F0`. **Without the header the GO still answers reads but ignored mySpark's preset switch** (owner test 2026-09-29: "not switching", read-back NOT verified). mySpark now always sends the header to the GO (`wrapBlock`, identical bytes). The LIVE doesn't need it (SparklingTones, Spark 2). **With the header, switching works:** slots 0 and 3 verified by read-back (owner log 2026-09-29). `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
+- **The GO reports Reverb's hidden on/off param (#7) in live state but not in the saved slot** ("expected 7 params, amp has 8" on "Upright Bass"). `presetDifferences` now compares params by index and **skips that hidden param entirely** (Noise Gate #2, Reverb #7): besides appearing on one side only, its value can disagree too. "Swell" had gate #2 = 0 in the slot but 1 in live state, with the gate on. The block's `enabled` flag, which is compared, is the real state. Everything else must still match.
 - Name reply `0x0311` = "Spark GO". The app also sends the licence exchange `0x0170` / `0x0470` (not examined, by rule).
-- Not seen: knob changes, uploads, levels, tuner on the GO. The GO stays **view-only** in mySpark until those are captured or owner-approved to try.
+- **Tuner works on the GO from mySpark** (owner, 2026-09-29: "tuner works"): the LIVE's `0x0165` on/off, sent with the GO's block header, confirmed by `0x0265` read-back. `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
+- Not seen yet: knob changes, uploads (the official app plays ToneCloud presets on the GO fine, but that session wasn't logged: the snoop log had silently stopped; only an empty `btsnooz_hci.log` remained), levels on the GO. The GO stays **view-only** in mySpark until those are captured or owner-approved to try.
+
+## 2026-09-29 — Spark GO preset upload (official app, snoop log)
+
+`captures/raw/go5-btsnoop_hci.log` (RFCOMM). `VERIFIED-HW (owner, Spark GO, official app traffic)`:
+- **Upload `0x0101` in 128-byte chunks** (3 chunks for a whole preset), sub-header `[total, index, size]`, **one seq for all chunks**, each message with the block header.
+- **Target `[0x00, 0x03]`: straight into slot 3**, then `0x0138 [0x00, 0x03]` (ACK `0x0438`). No `0x7f` buffer seen.
+- **ACKs reversed vs the Spark 2:** `0x0501` after each intermediate chunk, `0x0401` after the last. (`SparkTransport.writePreset` accepts either.)
+- New: `0x0204 [prefixed string name, 0x00]` → `0x0304 [float]`: named settings. The app asked `SparkMini.PostComp` (0.35) and `SparkGO.ScenarioEQ` (0.0). Meaning UNVERIFIED; not used.
+- Also seen: `0x0271` / `0x0272` → `0x0372 [c3 3c 00 1e]` (unknown, not used).
+- **Resolved (owner, second log `go6`):** the slot-3 upload was the owner's **save to slot**. The first ToneCloud play wasn't logged (logging had stopped). A new **ToneCloud play went to `[0x00, 0x7f]`** (temporary buffer), then `0x0138 [0x00, 0x7f]`. So the GO has the same temporary buffer and save pattern as the LIVE; only chunk size (128), ACK order and the block header differ.
+- mySpark now allows the GO: uploads to `0x7f` or slots 0–3 (128-byte chunks, 20-byte BLE writes) and switching to `0x7f`, enabling **Try** (AI, ToneCloud, My tones) and **Save to amp**. Needs an owner hardware test.
 
 ## 2026-09-28 — First contact with the Spark GO (mySpark app, reads only)
 

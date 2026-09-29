@@ -427,3 +427,4 @@ body[data-connection="connecting"] .power-led { background: var(--gold-hi); box-
 /* Amps without levels / a second channel (Spark GO) */
 body[data-amp="go"] .levels, body[data-amp="unknown"] .levels,
 body[data-amp="go"] #channel, body[data-amp="unknown"] #channel { visibility: hidden; }
+.card .actions select { flex: 1 1 140px; min-width: 0; font-size: 0.85rem; padding: 5px 6px; }

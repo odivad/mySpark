@@ -164,12 +164,44 @@ describe('send', () => {
     expect(writes(amp, 0x15)[0].checksumOk).toBe(true);
   });
 
+  it('wraps every message to the Spark GO in the 16-byte block header, like the official app', async () => {
+    const amp = new FakeAmp({ name: 'Spark GO BLE' });
+    const bytes: number[][] = [];
+    const bt = amp.bluetooth;
+    const t = new SparkTransport({ bluetooth: bt, timing: FAST });
+    await t.connect();
+    const writeChar = (amp as unknown as { writeChar: { writeValueWithoutResponse: (v: Uint8Array) => Promise<void> } }).writeChar;
+    const original = writeChar.writeValueWithoutResponse;
+    writeChar.writeValueWithoutResponse = async (v) => {
+      bytes.push(Array.from(v));
+      return original(v);
+    };
+    await t.send(commands.getCurrentPreset());
+    // From the owner's GO log: 01 fe 00 00 53 fe 17 00×9 f0 01 <seq> 00 02 10 f7
+    expect(bytes[0].slice(0, 16)).toEqual([0x01, 0xfe, 0x00, 0x00, 0x53, 0xfe, 0x17, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(bytes[0].slice(16, 18)).toEqual([0xf0, 0x01]);
+    expect(bytes[0].at(-1)).toBe(0xf7);
+  });
+
+  it('lets the Spark GO upload to its temporary buffer or slots 0–3 in 128-byte chunks, not elsewhere', async () => {
+    const amp = new FakeAmp({ name: 'Spark GO BLE' });
+    amp.live = [0x01, 0x00, ...capturedPreset0Payload().slice(2)];
+    const { t } = await connected(amp);
+    const r = await t.loadPreset(parsePreset(capturedPreset0Payload()));
+    const chunks = writes(amp, 0x01);
+    expect(chunks[0].data.slice(0, 5)).toEqual([chunks.length, 0, 128, 0x00, 0x7f]);
+    expect(r.verified).toBe(true);
+    const outside = await t.storePreset(parsePreset(capturedPreset0Payload()), 5, 8);
+    expect(outside).toMatchObject({ sent: false, verified: false, error: expect.stringMatching(/refused/) });
+  });
+
   it('lets the Spark GO switch presets but refuses its other writes', async () => {
     const { amp, t } = await connected(new FakeAmp({ name: 'Spark GO BLE' }));
     await t.send(commands.changePreset(2));
+    await t.send(commands.setTuner(true));
     await expect(t.send(commands.changeParam('Twin', 0, 0.5))).rejects.toThrow(/refused for Spark GO BLE/);
     await expect(t.send(commands.changePreset(SOFTWARE_PRESET, 0x01))).rejects.toThrow(/refused/);
-    expect(amp.received.map((m) => m.sub)).toEqual([0x38]);
+    expect(amp.received.map((m) => m.sub)).toEqual([0x38, 0x65]);
   });
 
   it('refuses write commands to an amp that is not a Spark LIVE, but allows reads', async () => {
@@ -471,6 +503,26 @@ describe('presetDifferences', () => {
     a.effects[3].params[0].value = 0.1;
     b.effects[3].params[0].value = Math.fround(0.1);
     expect(presetDifferences(a, b)).toEqual([]);
+  });
+
+  it('accepts the hidden on/off param of Reverb / Noise Gate on one side only (Spark GO live state)', () => {
+    const slot = copy(preset());
+    const live = copy(preset());
+    const reverb = live.effects[6];
+    reverb.params = [...slot.effects[6].params.filter((p) => p.index !== 7), { index: 7, value: 1 }];
+    slot.effects[6].params = slot.effects[6].params.filter((p) => p.index !== 7);
+    expect(presetDifferences(slot, live)).toEqual([]);
+    // Nor its value: a slot can store 0 for a gate that is on, while live state says 1 ("Swell").
+    const gateSlot = copy(preset());
+    const gateLive = copy(preset());
+    const g = gateLive.effects[0].params.find((p) => p.index === 2) ?? (gateLive.effects[0].params.push({ index: 2, value: 1 }), gateLive.effects[0].params[2]);
+    g.value = 1;
+    const gs = gateSlot.effects[0].params.find((p) => p.index === 2) ?? (gateSlot.effects[0].params.push({ index: 2, value: 0 }), gateSlot.effects[0].params[2]);
+    gs.value = 0;
+    expect(presetDifferences(gateSlot, gateLive)).toEqual([]);
+    // Any other extra or missing param is still a difference.
+    live.effects[4].params.push({ index: 9, value: 0.5 });
+    expect(presetDifferences(slot, live)).toEqual([expect.stringMatching(/extra param 9/)]);
   });
 
   it('names the block, model and param that differ', () => {
