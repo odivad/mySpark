@@ -71,7 +71,8 @@ Current code:
 
 ## Approved dependencies
 
-Runtime: none yet.
+Runtime (Android APK only, ADR-0004 amendment, approved 2026-09-29): `@capacitor/core`, `@capacitor-community/bluetooth-le`.
+Build (APK): `@capacitor/cli`, `@capacitor/android`.
 Dev: `typescript`, `tsx`, `@types/node`.
 Approved to add: `vitest`, `eslint`, `prettier` (and their standard TypeScript plugins/configs).
 Policy: pragmatic — well-maintained dependencies are acceptable, but every new one is flagged for owner approval first.

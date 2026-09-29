@@ -1,0 +1,6 @@
+{
+  "appId": "app.myspark",
+  "appName": "mySpark",
+  "webDir": "web",
+  "android": { "allowMixedContent": false }
+}
