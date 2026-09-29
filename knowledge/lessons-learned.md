@@ -203,7 +203,7 @@ Bug report pulled with `adb bugreport` (`captures/raw/`, git-ignored). `VERIFIED
 - New: `0x0204 [prefixed string name, 0x00]` → `0x0304 [float]`: named settings. The app asked `SparkMini.PostComp` (0.35) and `SparkGO.ScenarioEQ` (0.0). Meaning UNVERIFIED; not used.
 - Also seen: `0x0271` / `0x0272` → `0x0372 [c3 3c 00 1e]` (unknown, not used).
 - **Resolved (owner, second log `go6`):** the slot-3 upload was the owner's **save to slot**. The first ToneCloud play wasn't logged (logging had stopped). A new **ToneCloud play went to `[0x00, 0x7f]`** (temporary buffer), then `0x0138 [0x00, 0x7f]`. So the GO has the same temporary buffer and save pattern as the LIVE; only chunk size (128), ACK order and the block header differ.
-- mySpark now allows the GO: uploads to `0x7f` or slots 0–3 (128-byte chunks, 20-byte BLE writes) and switching to `0x7f`, enabling **Try** (AI, ToneCloud, My tones) and **Save to amp**. Needs an owner hardware test.
+- mySpark now allows the GO: uploads to `0x7f` or slots 0–3 (128-byte chunks, 20-byte BLE writes) and switching to `0x7f`, enabling **Try** (AI, ToneCloud, My tones) and **Save to amp**. Owner report after testing: **"working"** (2026-09-29). `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
 
 ## 2026-09-28 — First contact with the Spark GO (mySpark app, reads only)
 
