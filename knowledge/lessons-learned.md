@@ -181,6 +181,27 @@ Read-only probes, no credentials. SOURCED (ToneCloud, live API):
 - `GET /v2/preset/{id}` → `preset_data` (JSON string): `meta {id, name, version, description, icon}`, `bpm`, `sigpath[] {type, dspId, active, params[{index, value}]}` → `cloudToPreset` maps it onto our `Preset`.
 - Items include creator profiles (other people's names); the app neither shows nor stores them, and the test fixture has them removed.
 
+## 2026-09-28 — Spark GO with the official app (HCI snoop log)
+
+Bug report pulled with `adb bugreport` (`captures/raw/`, git-ignored). `VERIFIED-HW (owner, Spark GO, official app traffic)`:
+- **On Android the official app talks to the GO over classic Bluetooth (RFCOMM), not BLE.** The log has no ATT traffic; the Spark frames ride in RFCOMM UIH frames on a dynamic L2CAP channel. `tools/snoop/decode-btsnoop.ts` now decodes RFCOMM too. mySpark still uses BLE: the GO answers over BLE as well (first-contact log above).
+- **Same framing, same read commands, same preset format as the LIVE:** `0x0201 [0x00, n]` (the app pads to 7 bytes), `[0x01, 0x00]` for live; replies are 0x0301 chunks of 25 bytes with the `[total, index, size]` sub-header; presets have the **same 7-block chain** and model ids. The owner's four GO presets are bass tones on `GK800` (RB-800).
+- **The GO sometimes stops a preset reply after 13 chunks, with the official app too.** The app then asks again ~3 s later and gets all 14–16 chunks. **mySpark now does the same:** `SparkTransport` retries a reply that stops partway (up to 2 extra attempts). This was the "A4 / live sound unreadable" problem. **Owner test after the fix: "it reads"** — all four GO slots and the live sound load in mySpark. `VERIFIED-HW (owner, Spark GO, via mySpark app)`.
+- **Preset switch `0x0138 [0x00, n]` → ACK `0x0438`**, used 5 times by the app: same as the LIVE.
+- Name reply `0x0311` = "Spark GO". The app also sends the licence exchange `0x0170` / `0x0470` (not examined, by rule).
+- Not seen: knob changes, uploads, levels, tuner on the GO. The GO stays **view-only** in mySpark until those are captured or owner-approved to try.
+
+## 2026-09-28 — First contact with the Spark GO (mySpark app, reads only)
+
+Owner's app log. `VERIFIED-HW (owner, Spark GO, via mySpark app)`:
+- **BLE name `Spark GO BLE`.** Connects with the same service filter (`0xffc0`) and characteristics as the LIVE.
+- **Answers** `0x0211` (name), `0x0223` (serial) and `0x0210` (current preset) promptly.
+- **No answer** to `0x0233` (levels, three targets) or `0x021a` (channel presets): 2.5 s timeout each. The GO has no Guitar/Music/Master levels or second channel of that kind.
+- **`0x0201 [0x00, n]` works for slots 0, 1, 2** (about 0.6 s each).
+- **Slot 3 and the live state (`0x0201 [0x01, 0x00]`) arrived incomplete**: 13 good 0x0301 chunks with the request's seq, then nothing for 4 s. Probably the same preset (current = slot 3?). Cause unknown: pending a raw capture (tools/live-test session JSON).
+- **Slots 4–7: a single 0x0301 chunk each**, then nothing. Consistent with the GO having **4 slots** (SOURCED soundshed); the single chunk is presumably its "no such slot" reply.
+- App change: amp profiles by BLE name (`profileFor`). GO = 4 slots, no level or channel reads, **view-only** (controls disabled; the transport refuses writes too).
+
 ## 2026-09-28 — Built-in tuner, from the official app's traffic
 
 From `captures/raw/btsnoop_hci.log.last` (official app on the owner's Spark LIVE, a tuner session on 2026-09-27). `VERIFIED-HW (owner, Spark LIVE, official app traffic)` unless marked:

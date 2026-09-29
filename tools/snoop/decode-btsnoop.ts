@@ -58,8 +58,36 @@ function assemblerFor(dir: Out['dir'], handle: number): MessageAssembler {
   return a;
 }
 
+/**
+ * Classic Bluetooth: RFCOMM frames on a dynamic L2CAP channel (the official app talks to the Spark
+ * GO this way on Android). Frame: address, control, length (1 byte if its low bit is 1, else 2),
+ * [credits byte on UIH frames with the P/F bit], data, FCS. Only UIH data frames on DLCI > 0 carry
+ * the serial stream; Spark frames inside are reassembled per channel and DLCI.
+ */
+function onRfcomm(cid: number, frame: number[], dir: Out['dir'], t: string): void {
+  if (frame.length < 4) return;
+  const dlci = frame[0] >> 2;
+  const control = frame[1];
+  if ((control & 0xef) !== 0xef || dlci === 0) return; // UIH data only
+  let i = 2;
+  let len = frame[i] >> 1;
+  if (frame[i] & 1) i += 1;
+  else {
+    len = (frame[i] >> 1) | (frame[i + 1] << 7);
+    i += 2;
+  }
+  if (control & 0x10) i += 1; // credit byte
+  const data = frame.slice(i, i + len);
+  current = { t, dir, handle: 0x10000 + cid * 0x100 + dlci };
+  assemblerFor(dir, current.handle).feed(data);
+}
+
 function onL2cap(pdu: number[], dir: Out['dir'], t: string): void {
   const cid = pdu[2] | (pdu[3] << 8);
+  if (cid >= 0x0040) {
+    onRfcomm(cid, pdu.slice(4), dir, t);
+    return;
+  }
   if (cid !== 0x0004) return; // ATT only
   const att = pdu.slice(4);
   const opcode = att[0];

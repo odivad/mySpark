@@ -6,9 +6,8 @@
  * commit f25379d. See THIRD_PARTY_NOTICES.md. Changes from the original:
  * - Preset writes (loadPreset, storePreset) and setBpm read the result back from the amp and
  *   compare it (knowledge/approved-patterns.md §1). SparklingTones stops at the ACK.
- * - Write commands (cmd 0x01) are refused unless the connected amp is a Spark LIVE: everything
- *   here follows Spark 2 conventions, and the Spark GO (Spark 40-style per soundshed) needs its
- *   own model profile first (planning/tasks.md).
+ * - Write commands (cmd 0x01) are checked per amp (writeAllowed): the Spark LIVE takes them all;
+ *   the Spark GO only the preset switch, the one write seen verified from its official app.
  * - A failed BLE write rejects the caller's promise instead of only being logged.
  * - Slot counts are passed in by the caller rather than assumed.
  *
@@ -98,6 +97,22 @@ export const CHAR_NOTIFY_UUID = 0xffc2;
 /** BLE name of the owner's Spark LIVE. VERIFIED-HW: Spark LIVE (owner screenshot, 2026-09-28). */
 export const SPARK_LIVE_NAME = 'Spark LIVE BLE';
 
+/** BLE name of the owner's Spark GO. VERIFIED-HW: Spark GO (mySpark log, 2026-09-28). */
+export const SPARK_GO_NAME = 'Spark GO BLE';
+
+/**
+ * Which writes each amp may receive. The LIVE: all (Spark 2 conventions, verified). The GO: only
+ * the preset switch 0x0138 [0x00, slot] — the official app sends exactly that and the GO ACKs it
+ * (owner's GO, HCI snoop log 2026-09-28); owner approved enabling it. Everything else stays refused
+ * until captured. Anything else: no writes.
+ */
+export function writeAllowed(deviceName: string | null, command: SparkCommand): boolean {
+  if (command.cmd !== CMD_ACTION) return true;
+  if (deviceName === SPARK_LIVE_NAME) return true;
+  if (deviceName === SPARK_GO_NAME) return command.sub === 0x38 && command.data.length === 2 && command.data[0] === 0x00;
+  return false;
+}
+
 /** ACK for the last chunk of a 0x0101 preset upload (intermediate chunks get 0x04). SOURCED: SparklingTones. */
 export const CMD_ACK_FINAL = 0x05;
 
@@ -127,6 +142,8 @@ export interface SparkTiming {
   storeSwitchDelay: number;
   /** Wait after switching to the software buffer before reading live state (SparklingTones index.html, Tweak). */
   loadSettleDelay: number;
+  /** Extra attempts when a preset reply stops partway (Spark GO; VERIFIED-HW). */
+  presetReadRetries: number;
 }
 
 export const DEFAULT_TIMING: SparkTiming = {
@@ -137,6 +154,7 @@ export const DEFAULT_TIMING: SparkTiming = {
   libraryReadGap: 150,
   storeSwitchDelay: 300,
   loadSettleDelay: 400,
+  presetReadRetries: 2,
 };
 
 /* ======================================================================
@@ -389,10 +407,10 @@ export class SparkTransport {
   async send(command: SparkCommand, options: SendOptions = {}): Promise<number> {
     const writeChar = this.writeChar;
     if (!writeChar) throw new Error('Not connected');
-    if (command.cmd === CMD_ACTION && this.deviceName !== SPARK_LIVE_NAME) {
+    if (!writeAllowed(this.deviceName, command)) {
       throw new Error(
-        `Write 0x${hex(command.cmd)}${hex(command.sub)} refused: only the Spark LIVE is supported for writes ` +
-          `(connected: ${this.deviceName ?? 'unknown'})`,
+        `Write 0x${hex(command.cmd)}${hex(command.sub)} refused for ${this.deviceName ?? 'unknown amp'}: ` +
+          'not verified on this amp (only the Spark LIVE takes all writes; the Spark GO only preset switches)',
       );
     }
     const seq = options.seq ?? this.nextSeq();
@@ -572,7 +590,25 @@ export class SparkTransport {
     return out;
   }
 
+  /**
+   * One preset read, retried when the reply stops partway. The Spark GO sometimes stops a 0x0301
+   * reply after 13 of its 14–16 chunks, with the official app too; the official app simply asks
+   * again ~3 s later and gets it whole (owner's GO, HCI snoop log 2026-09-28). VERIFIED-HW: Spark GO.
+   */
   private async readPresetVia(command: SparkCommand, label: string, timeoutMs?: number): Promise<Preset | null> {
+    for (let attempt = 0; attempt <= this.timing.presetReadRetries; attempt++) {
+      const result = await this.readPresetOnce(command, label, timeoutMs);
+      if (result.preset || !result.partial) return result.preset;
+      if (attempt < this.timing.presetReadRetries) this.onLog(`${label}: reply stopped partway — asking again`);
+    }
+    return null;
+  }
+
+  private async readPresetOnce(
+    command: SparkCommand,
+    label: string,
+    timeoutMs?: number,
+  ): Promise<{ preset: Preset | null; partial: boolean }> {
     const chunks: SparkMessage[] = [];
     const rxBefore = this.rxTotal;
     // Chosen before sending so no early reply chunk slips past the seq filter.
@@ -591,17 +627,19 @@ export class SparkTransport {
       this.onLog(
         `${label}: no complete reply (${chunks.length} good chunks, ${this.rxTotal - rxBefore} messages received in total)`,
       );
-      return null;
+      // Several chunks then silence = a reply cut short (worth retrying). One chunk = the GO's
+      // answer for a slot it doesn't have; none = no answer at all.
+      return { preset: null, partial: chunks.length > 1 };
     }
 
     const payload = assemblePresetPayload(chunks).payload;
     try {
-      return parsePreset(payload);
+      return { preset: parsePreset(payload), partial: false };
     } catch (err) {
       const error = (err as Error).message;
       this.lastFailedPayload = { label, payload, error, at: new Date().toISOString() };
       this.onLog(`${label}: parse error — ${error} (${payload.length}-byte payload kept)`);
-      return null;
+      return { preset: null, partial: false };
     }
   }
 

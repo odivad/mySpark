@@ -49,6 +49,10 @@ Rules:
 - A ToneCloud preset is untrusted input: `cloudToPreset` type-checks it, and it may only be tried or saved if every model is on the Spark 2 list or confirmed on the connected amp. It is only played in the temporary buffer `0x7f`.
 - Creator profile data is not shown or stored.
 
+## 2d. Writes per amp
+
+- `writeAllowed` (`src/spark/transport.ts`) decides which write commands reach which amp: the **Spark LIVE** all; the **Spark GO** only the preset switch `0x0138 [0x00, n]` (owner approved 2026-09-28, after the official app's log showed it and the GO ACKing it); anything else none. Widening it for the GO needs captured evidence and owner approval.
+
 ## 2b. Model changes
 
 - The model picker sends any model on the Spark 2 list (`src/spark/catalog.ts`) without a warning: **owner decision, 2026-09-28**, after every untried model they tried worked on the LIVE. Accepted residual risk: a model the amp lacks can freeze it until power-off (SparklingTones, Spark 2).

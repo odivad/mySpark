@@ -423,3 +423,7 @@ body[data-connection="connecting"] .power-led { background: var(--gold-hi); box-
 .tuner-strings { text-align: center; color: var(--amp-muted); letter-spacing: 0.3em; font-size: 0.8rem; margin-bottom: 10px; }
 .tuner-box .note { text-align: center; margin: 0; color: var(--amp-muted); }
 @media (prefers-reduced-motion: reduce) { .tuner-needle, .tuner-note { transition: none; } }
+
+/* Amps without levels / a second channel (Spark GO) */
+body[data-amp="go"] .levels, body[data-amp="unknown"] .levels,
+body[data-amp="go"] #channel, body[data-amp="unknown"] #channel { visibility: hidden; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AMP_BLOCK, backupFileName, blockName, buildBackup, formatValue, isEditableParam, paramName } from '../src/app/model.js';
+import { AMP_BLOCK, backupFileName, blockName, buildBackup, formatValue, isEditableParam, paramName, profileFor } from '../src/app/model.js';
 import { MessageAssembler, type SparkMessage, assemblePresetPayload, parsePreset } from '../src/spark/protocol.js';
 import { PRESET0_CHUNKS } from './fixtures/sparklingtones.js';
 
@@ -70,3 +70,12 @@ describe('backup', () => {
     expect(backupFileName(backup)).toBe('myspark-backup-2026-09-28T23-59-01Z.json');
   });
 });
+
+describe('amp profiles', () => {
+  it('picks the profile from the BLE name: LIVE writable with 8 slots, GO view-only with 4', () => {
+    expect(profileFor('Spark LIVE BLE')).toMatchObject({ id: 'live', slotCount: 8, hasLevels: true, hasChannels: true, canWrite: true });
+    expect(profileFor('Spark GO BLE')).toMatchObject({ id: 'go', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true });
+    expect(profileFor('Something else')).toMatchObject({ id: 'unknown', canWrite: false });
+  });
+});
+

@@ -53,6 +53,8 @@ export class FakeAmp {
   ignoreWrites = false;
   /** Don't answer reads. */
   silent = false;
+  /** Send only the first N chunks of the next preset replies (the Spark GO does this). */
+  truncateReplies: number[] = [];
   /** Make the next BLE write throw. */
   failNextWrite = false;
 
@@ -151,7 +153,9 @@ export class FakeAmp {
   }
 
   private sendPreset(payload: number[], seq: number): void {
-    for (const chunk of splitPresetIntoChunks(payload)) this.reply(CMD_NOTIFY, 0x01, chunk, seq);
+    const cut = this.truncateReplies.shift();
+    const chunks = splitPresetIntoChunks(payload);
+    for (const chunk of cut === undefined ? chunks : chunks.slice(0, cut)) this.reply(CMD_NOTIFY, 0x01, chunk, seq);
   }
 
   private handle(m: SparkMessage): void {

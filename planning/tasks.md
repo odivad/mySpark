@@ -72,3 +72,10 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [x] Built-in tuner (owner request 2026-09-28): `0x0165` on/off with `0x0265` read-back, `0x0364` readings; Tuner button + display — needs owner hardware test
 - [x] Playing highlight on AI / ToneCloud / My tones cards (owner request)
 
+## Spark GO (started 2026-09-28)
+
+- [x] Read presets and live sound (with retry for replies that stop at 13 chunks) — owner confirmed "it reads"
+- [x] Amp profile by BLE name: 4 slots, no levels/channels
+- [x] Preset switching on the GO (owner approved 2026-09-28) — needs owner hardware test
+- [ ] Knob change, block on/off, model change on the GO: snoop log of the official app doing them first
+

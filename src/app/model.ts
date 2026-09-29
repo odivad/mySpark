@@ -8,6 +8,36 @@ import { MODEL_INFO, knobName } from '../spark/catalog.js';
 /** CH1 preset slots on the Spark LIVE: A1–A4, B1–B4. VERIFIED-HW: Spark LIVE. */
 export const LIVE_SLOT_COUNT = 8;
 
+/** What the app may ask of / do with the connected amp, chosen from its BLE name. */
+export interface AmpProfile {
+  id: 'live' | 'go' | 'unknown';
+  label: string;
+  slotCount: number;
+  /** Guitar/Music/Master levels (0x0133/0x0233). */
+  hasLevels: boolean;
+  /** Two channels (CH2 banks 0x03/0x04, 0x021a). */
+  hasChannels: boolean;
+  /** Writes are only built for the LIVE (the transport refuses others too). */
+  canWrite: boolean;
+  /** Preset switching (0x0138) allowed even when other writes aren't (Spark GO). */
+  canSwitch: boolean;
+}
+
+/**
+ * Spark LIVE: everything VERIFIED-HW. Spark GO ("Spark GO BLE", owner's GO 2026-09-28): answers
+ * name/serial/current preset and reads slots 0–2; no answer to 0x0233 levels or 0x021a; one short
+ * reply for slots 4–7 (it has 4 slots: SOURCED soundshed). View-only until its protocol is mapped.
+ */
+export function profileFor(deviceName: string | null): AmpProfile {
+  if (deviceName === 'Spark LIVE BLE') {
+    return { id: 'live', label: 'Spark LIVE', slotCount: LIVE_SLOT_COUNT, hasLevels: true, hasChannels: true, canWrite: true, canSwitch: true };
+  }
+  if (deviceName === 'Spark GO BLE') {
+    return { id: 'go', label: 'Spark GO', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: true };
+  }
+  return { id: 'unknown', label: deviceName ?? 'Spark', slotCount: 4, hasLevels: false, hasChannels: false, canWrite: false, canSwitch: false };
+}
+
 /** Chain position of the amp block. SOURCED: SparklingTones; VERIFIED-HW: Spark LIVE. */
 export const AMP_BLOCK = 3;
 

@@ -8,6 +8,8 @@ import { SparkTransport, type SlotRead } from '../spark/transport.js';
 import {
   AMP_BLOCK,
   LIVE_SLOT_COUNT,
+  type AmpProfile,
+  profileFor,
   backupFileName,
   blockName,
   buildBackup,
@@ -72,6 +74,10 @@ let aiRunning = false;
 let channel: 1 | 2 = 1;
 let ch2Slots: SlotRead[] = [];
 let ch2Live: Preset | null = null;
+/** True when "Playing now" shows a slot's saved version because live state couldn't be read (GO). */
+let liveIsSavedCopy = false;
+/** Chosen at connect from the BLE name. Before connecting: the LIVE layout. */
+let profile: AmpProfile = profileFor('Spark LIVE BLE');
 let cloudResults: CloudSummary[] = [];
 let cloudBusy = false;
 let cloudPage = 1;
@@ -276,26 +282,42 @@ async function connect(): Promise<void> {
   }
   await userAction(async () => {
     setMessage('Reading the amp…');
+    profile = profileFor(transport.deviceName);
+    document.body.dataset.amp = profile.id;
     await transport.identify();
     renderInfo();
-    for (const target of Object.values(VOLUME)) await transport.readVolume(target);
-    await transport.readChannelPresets();
+    if (profile.hasLevels) for (const target of Object.values(VOLUME)) await transport.readVolume(target);
+    if (profile.hasChannels) await transport.readChannelPresets();
     renderLevels();
-    slots = await transport.readLibrary(LIVE_SLOT_COUNT, (i) => setMessage(`Reading ${slotLabel(i).label}…`));
+    renderSlots();
+    renderLevels();
+    slots = await transport.readLibrary(profile.slotCount, (i) => setMessage(`Reading ${slotLabel(i).label}…`));
     renderSlots();
     live = await transport.readLiveState();
+    liveIsSavedCopy = false;
+    if (!live && profile.id === 'go') {
+      // Spark GO: its live-state reply doesn't complete yet (under investigation). Show the saved
+      // version of the current preset instead, and say so.
+      const current = transport.state.currentPreset;
+      const saved = current !== null ? slots.find((x) => x.slot === current)?.preset : null;
+      if (saved) {
+        live = saved;
+        liveIsSavedCopy = true;
+      }
+    }
     await rememberModels();
     renderLive();
     const ok = slots.filter((s) => s.preset).length;
-    const good = ok === LIVE_SLOT_COUNT && live !== null;
-    setMessage(good ? 'Ready.' : `Read ${ok} of ${LIVE_SLOT_COUNT} presets${live ? '' : ', live sound unreadable'}.`, good ? 'ok' : 'warn');
+    const good = ok === profile.slotCount && live !== null;
+    const tail = profile.canWrite ? '' : profile.canSwitch ? ` ${profile.label}: preset switching only for now.` : ` ${profile.label}: view only for now.`;
+    setMessage((good ? 'Ready.' : `Read ${ok} of ${profile.slotCount} presets${live ? '' : ', live sound unreadable'}.`) + tail, good ? 'ok' : 'warn');
   });
 }
 
 async function switchTo(slot: number): Promise<void> {
   await userAction(async () => {
     setMessage(`Switching to ${slotLabel(slot).label}…`);
-    const r = await transport.switchPreset(slot, LIVE_SLOT_COUNT);
+    const r = await transport.switchPreset(slot, profile.slotCount);
     bufferName = null;
     playingKey = null;
     renderCardLists();
@@ -1036,13 +1058,16 @@ async function changeModel(block: number, from: string, to: string, untried: boo
 /* ---------------------------------------------------------------- rendering */
 
 function renderControls(): void {
-  const on = transport.connected;
+  const connected = transport.connected;
   const idle = blocking === 0;
-  $<HTMLButtonElement>('connect').hidden = on;
-  $<HTMLButtonElement>('disconnect').hidden = !on;
+  // Everything below that changes the amp needs a writable profile; reads (backup) don't.
+  const on = connected && profile.canWrite;
+  $<HTMLButtonElement>('connect').hidden = connected;
+  $<HTMLButtonElement>('disconnect').hidden = !connected;
   $<HTMLButtonElement>('connect').disabled = document.body.dataset.connection === 'connecting';
-  $<HTMLButtonElement>('backup').disabled = !on || !idle || slots.every((s) => !s.preset);
-  document.querySelectorAll<HTMLButtonElement>('#slots button').forEach((b) => (b.disabled = !on || !idle || channel === 2));
+  $<HTMLButtonElement>('backup').disabled = !connected || !idle || slots.every((s) => !s.preset);
+  const canSwitch = connected && profile.canSwitch;
+  document.querySelectorAll<HTMLButtonElement>('#slots button').forEach((b) => (b.disabled = !canSwitch || !idle || channel === 2));
   for (const v of blockViews) v.toggle.disabled = !on || !idle;
   for (const v of paramViews.values()) if (v.input) v.input.disabled = !on || !idle;
   $<HTMLButtonElement>('save-current').disabled = !live || channel === 2;
@@ -1084,7 +1109,7 @@ function renderSlots(): void {
     renderControls();
     return;
   }
-  for (let slot = 0; slot < LIVE_SLOT_COUNT; slot++) {
+  for (let slot = 0; slot < profile.slotCount; slot++) {
     const { bank, label } = slotLabel(slot);
     const preset = slots.find((s) => s.slot === slot)?.preset;
     const button = el(
@@ -1102,7 +1127,12 @@ function renderSlots(): void {
 
 function liveLabel(): string {
   if (!live) return '';
-  const where = transport.state.currentPreset === SOFTWARE_PRESET ? ' · temporary buffer' : '';
+  const where =
+    transport.state.currentPreset === SOFTWARE_PRESET
+      ? ' · temporary buffer'
+      : liveIsSavedCopy
+        ? ' · saved version (live sound not readable on this amp yet)'
+        : '';
   return `${live.name} · ${live.bpm.toFixed(0)} bpm${where}`;
 }
 

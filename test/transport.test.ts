@@ -94,6 +94,29 @@ describe('reading presets', () => {
     expect(preset).toEqual(parsePreset(capturedPreset0Payload()));
   });
 
+  it('asks again when a reply stops partway, like the official app does with the Spark GO', async () => {
+    const amp = new FakeAmp({ slots: new Map([[0, capturedPreset0Payload()]]) });
+    amp.truncateReplies = [13];
+    const { t, log } = await connected(amp);
+    const preset = await t.readPreset(0);
+    expect(preset?.name).toBe(parsePreset(capturedPreset0Payload()).name);
+    expect(log.some((l) => /stopped partway — asking again/.test(l))).toBe(true);
+    expect(amp.received.filter((m) => m.cmd === 0x02 && m.sub === 0x01)).toHaveLength(2);
+  });
+
+  it('gives up after the retries, and does not retry a slot that only sends one chunk', async () => {
+    const amp = new FakeAmp({ slots: new Map([[0, capturedPreset0Payload()]]) });
+    amp.truncateReplies = [13, 13, 13];
+    const { t } = await connected(amp);
+    expect(await t.readPreset(0)).toBeNull();
+    expect(amp.received.filter((m) => m.cmd === 0x02 && m.sub === 0x01)).toHaveLength(3);
+    const one = new FakeAmp({ slots: new Map([[5, capturedPreset0Payload()]]) });
+    one.truncateReplies = [1];
+    const c = await connected(one);
+    expect(await c.t.readPreset(5)).toBeNull();
+    expect(one.received.filter((m) => m.cmd === 0x02 && m.sub === 0x01)).toHaveLength(1);
+  });
+
   it('ignores reply chunks carrying another seq, and times out', async () => {
     const { amp, t, log } = await connected();
     amp.silent = true;
@@ -141,9 +164,17 @@ describe('send', () => {
     expect(writes(amp, 0x15)[0].checksumOk).toBe(true);
   });
 
+  it('lets the Spark GO switch presets but refuses its other writes', async () => {
+    const { amp, t } = await connected(new FakeAmp({ name: 'Spark GO BLE' }));
+    await t.send(commands.changePreset(2));
+    await expect(t.send(commands.changeParam('Twin', 0, 0.5))).rejects.toThrow(/refused for Spark GO BLE/);
+    await expect(t.send(commands.changePreset(SOFTWARE_PRESET, 0x01))).rejects.toThrow(/refused/);
+    expect(amp.received.map((m) => m.sub)).toEqual([0x38]);
+  });
+
   it('refuses write commands to an amp that is not a Spark LIVE, but allows reads', async () => {
     const { amp, t } = await connected(new FakeAmp({ name: 'Some other Spark' }));
-    await expect(t.send(commands.changePreset(1))).rejects.toThrow(/only the Spark LIVE/);
+    await expect(t.send(commands.changePreset(1))).rejects.toThrow(/not verified on this amp/);
     await t.send(commands.getName());
     expect(amp.received.map((m) => m.sub)).toEqual([0x11]);
   });
