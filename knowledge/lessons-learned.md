@@ -53,7 +53,7 @@ The editor opened with a fully decoded chain → all three steps succeeded. `VER
 - The LIVE's guitar-channel preset format matches Spark 2: 7-block chain (Noise Gate, Comp/Wah, Drive, Amp, Modulation, Delay, Reverb), per-block on/off, model names (e.g. amp `ODS 50` — "Dumble ODS 50 HRM"), knob values (Gain 7.1, Bass 4.6, Middle 3.6, Treble 6.6, Master 6.2), tempo 120 bpm.
 - **No saved slot was written.** The `0x7f` buffer is temporary.
 
-# TO CONFIRM (owner): did the amp's LED blink after Tweak (SparklingTones says it blinks while playing the software buffer)?
+LED blink while playing the software buffer: confirmed on the LIVE, 2026-09-28 (mySpark write test, below).
 
 ### Knob changes work on the Spark LIVE (2026-09-28)
 Owner turned knobs in the SparklingTones Tweak editor: **the changes reached the LIVE and sounded correct.** `VERIFIED-HW (owner, Spark LIVE, via SparklingTones)`.
@@ -162,6 +162,18 @@ Capture: `captures/2026-09-28-live-capture-3-mapping.json`, one marker per contr
 - **The amp's own seq wraps `0x7f` → `0x40`** (seen `…7e, 7f` then `40`). Amp range is `0x40`–`0x7f`. SparklingTones only says "above `0x3f`".
 
 Consequence for the controller: it can keep its cache in sync by listening, instead of polling — apply `0x0338`/`0x0337` to the cached state, then confirm with a read (`0x0201`) when it matters.
+
+## 2026-09-28 — mySpark's first write: temporary-buffer load, verified by read-back
+
+`tools/write-test/` in Chrome on the Windows PC. The owner read the 8 slots, picked one, and loaded it with `SparkTransport.loadPreset`. Owner report: **sounds right, page showed "✓ Verified", preset LED blinked.**
+
+`VERIFIED-HW (owner, Spark LIVE, via mySpark tools/write-test)`:
+- mySpark's own `0x0101` upload to `[0x00, 0x7f]` (one seq for all chunks, per-chunk ACK wait) + `0x0138` switch to `0x7f` works.
+- **The read-back comparison passes on live state**: `0x0201 [0x01, 0x00]` returns the preset with uuid, name, version, description, icon, bpm and every block/param exactly as written (float32). The UNVERIFIED note in `src/spark/verify.ts` about metadata is resolved — no need to relax the check.
+- **The PRESET LED blinks while the amp plays the temporary buffer** (resolves the earlier TO CONFIRM; SparklingTones reported the same on the Spark 2).
+- **"Lower Gain by 1.0" was ticked** (owner): the verified preset was a *modified* copy of the slot (amp Gain −0.1 on the 0–1 scale), so the upload carried our change, not just the slot's own bytes.
+
+Still not done by mySpark: slot writes (`storePreset`), `setBpm`, and single-knob / on-off / model writes.
 
 ## 2026-09-28 — mySpark's own SparkTransport reads the Spark LIVE
 

@@ -12,10 +12,9 @@ import type { Preset } from './protocol.js';
  * Not compared: `bank`/`number` (the target address, not content), `tail` (not sent — see
  * SparkTransport.writePreset) and the trailing checksum.
  *
- * UNVERIFIED: that the amp reports back the metadata (uuid, name, version, description, icon)
- * exactly as written, especially for live state (0x0201 [0x01, 0x00]). If the first hardware
- * test shows metadata-only differences on a write that sounds right, record it in
- * knowledge/lessons-learned.md and relax this check with the owner's approval.
+ * VERIFIED-HW (Spark LIVE, 2026-09-28): after loadPreset, live state (0x0201 [0x01, 0x00]) reports
+ * metadata and chain exactly as written, so this full comparison passes. Not yet checked for a
+ * slot read-back after storePreset.
  */
 export function presetDifferences(expected: Preset, actual: Preset): string[] {
   const diffs: string[] = [];

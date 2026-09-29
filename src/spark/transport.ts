@@ -589,8 +589,8 @@ export class SparkTransport {
   /**
    * Plays a preset without overwriting any saved slot: 0x0101 to the software buffer 0x7f, then
    * 0x0138 to switch to it (without the switch the amp ACKs every chunk and keeps playing the old
-   * sound), then reads live state back and compares. VERIFIED-HW: Spark LIVE (via SparklingTones,
-   * without the comparison).
+   * sound), then reads live state back and compares. VERIFIED-HW: Spark LIVE — mySpark
+   * tools/write-test, read-back verified, 2026-09-28. The PRESET LED blinks while 0x7f plays.
    *
    * Changes live amp state: needs owner approval and a hardware test before use.
    */

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spark Write Test</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --line:#ddd; --accent:#0a66c2; --ok:#0a7d32; --warn:#b3261e; --box:#fff7e0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141414; --fg:#eee; --muted:#999; --line:#333; --accent:#6aa7ff; --ok:#5fd08a; --warn:#ff8a80; --box:#2a2414; }
+  }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; max-width:900px; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  h2 { font-size:1rem; margin:20px 0 6px; }
+  p.note { color:var(--muted); margin:0 0 12px; font-size:0.9rem; }
+  .box { background:var(--box); border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:12px; font-size:0.9rem; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  button, select { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--fg); }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled, select:disabled { opacity:0.4; cursor:default; }
+  #status { font-weight:600; margin-bottom:4px; }
+  #result { font-size:1.05rem; font-weight:600; margin:8px 0; }
+  .ok { color:var(--ok); }
+  .warn { color:var(--warn); }
+  ul { margin:4px 0; padding-left:20px; }
+  #log { font:12px/1.5 ui-monospace, Consolas, monospace; border:1px solid var(--line); border-radius:6px; padding:8px; height:30vh; overflow:auto; white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<h1>Spark Write Test: temporary buffer</h1>
+<p class="note">mySpark's first write. Loads a preset into the amp's <strong>temporary buffer (0x7f)</strong>, switches to it, then reads the live sound back and compares.</p>
+<div class="box">
+  <strong>What this changes:</strong> only the sound the amp is playing right now. <strong>No saved slot is written.</strong>
+  Pressing PRESET on the amp brings back your saved sound.<br>
+  <strong>Safety:</strong> you can only load presets this page has just read from your own amp, so every model in them is one the amp has.
+  Writes are refused unless the amp is "Spark LIVE BLE".
+</div>
+
+<div class="bar">
+  <button id="connect" class="primary">1. Connect</button>
+  <button id="read" disabled>2. Read slots</button>
+  <button id="disconnect" disabled>Disconnect</button>
+</div>
+<div id="status">Not connected</div>
+
+<h2>3. Choose what to load</h2>
+<div class="bar">
+  <select id="slot" disabled><option>Read slots first</option></select>
+  <label><input type="checkbox" id="nudge"> Lower Gain by 1.0 so you can hear it's our copy</label>
+</div>
+<div class="bar">
+  <button id="load" disabled>4. Load into temporary buffer</button>
+  <button id="save" disabled>Save session (JSON)</button>
+</div>
+<div id="result"></div>
+<div id="details"></div>
+
+<h2>Log</h2>
+<div id="log"></div>
+
+<script type="module">
+import { SparkTransport } from '../../dist/spark/transport.js';
+import { slotLabel } from '../../dist/spark/protocol.js';
+
+const SLOT_COUNT = 8; // VERIFIED-HW: Spark LIVE
+const AMP_BLOCK = 3; // chain position of the amp; Gain is param 0 (VERIFIED-HW: Spark LIVE, capture 3)
+
+const $ = (id) => document.getElementById(id);
+const hex = (a) => Array.from(a, (b) => b.toString(16).padStart(2, '0')).join(' ');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const session = { tool: 'mySpark tools/write-test', startedAt: null, device: null, slots: [], attempts: [], rx: [] };
+
+function log(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toISOString().slice(11, 23)}  ${text}`;
+  $('log').appendChild(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+const t = new SparkTransport({
+  onStatus: (status, detail) => {
+    $('status').textContent = status === 'connected' ? `Connected: ${detail}` : detail;
+    const on = status === 'connected';
+    $('connect').disabled = on || status === 'connecting';
+    $('read').disabled = !on;
+    $('disconnect').disabled = !on;
+    if (!on) { $('load').disabled = true; $('slot').disabled = true; }
+  },
+  onLog: (line) => log(line),
+  onMessage: (m) => {
+    session.rx.push({ t: new Date().toISOString(), cmd: m.cmd, sub: m.sub, seq: m.seq, checksumOk: m.checksumOk, hex: hex(m.raw) });
+  },
+});
+
+$('connect').onclick = async () => {
+  try {
+    session.device = await t.connect();
+    session.startedAt = new Date().toISOString();
+    $('save').disabled = false;
+  } catch (e) {
+    $('status').textContent = `Could not connect: ${e.name}: ${e.message}`;
+  }
+};
+
+$('read').onclick = async () => {
+  $('read').disabled = true;
+  try {
+    session.slots = await t.readLibrary(SLOT_COUNT, (i) => { $('status').textContent = `Reading slot ${slotLabel(i).label}…`; });
+    const readable = session.slots.filter((s) => s.preset);
+    $('slot').innerHTML = readable.map(({ slot, preset }) =>
+      `<option value="${slot}">${slotLabel(slot).label}: ${esc(preset.name)}</option>`).join('');
+    $('slot').disabled = readable.length === 0;
+    $('load').disabled = readable.length === 0;
+    $('status').textContent = `Read ${readable.length} of ${SLOT_COUNT} slots. Pick one to load.`;
+  } finally {
+    $('read').disabled = !t.connected;
+  }
+};
+
+$('disconnect').onclick = () => t.disconnect();
+
+$('load').onclick = async () => {
+  const slot = Number($('slot').value);
+  const source = session.slots.find((s) => s.slot === slot)?.preset;
+  if (!source) return;
+  const preset = structuredClone(source);
+  let change = 'unchanged';
+  if ($('nudge').checked) {
+    const gain = preset.effects[AMP_BLOCK]?.params.find((p) => p.index === 0);
+    if (gain) {
+      const before = gain.value;
+      gain.value = Math.max(0, gain.value - 0.1);
+      change = `amp Gain ${(before * 10).toFixed(1)} → ${(gain.value * 10).toFixed(1)}`;
+    }
+  }
+  const ok = confirm(
+    `Load "${preset.name}" (${slotLabel(slot).label}, ${change}) into the amp's temporary buffer?\n\n` +
+    `This changes the sound the amp is playing. No saved slot is written.`);
+  if (!ok) return;
+
+  $('load').disabled = true;
+  $('result').textContent = 'Sending…';
+  $('details').innerHTML = '';
+  try {
+    const r = await t.loadPreset(preset, (i, n) => { $('status').textContent = `Sending chunk ${i + 1} of ${n}…`; });
+    session.attempts.push({ at: new Date().toISOString(), slot, change, sent: preset, result: r });
+    $('status').textContent = `Sent ${r.chunksSent} of ${r.chunksTotal} chunks, ${r.acks} acknowledged.`;
+    if (r.verified) {
+      $('result').innerHTML = '<span class="ok">✓ Verified: the amp is playing exactly what we sent.</span>';
+    } else {
+      $('result').innerHTML = '<span class="warn">✗ Not verified: the amp\'s read-back differs from what we sent.</span>';
+      $('details').innerHTML = `<ul>${r.differences.map((d) => `<li>${esc(d)}</li>`).join('')}</ul>` +
+        '<p class="note">Please save the session and tell me. Metadata-only differences (name, uuid…) may just mean the check is too strict.</p>';
+    }
+  } catch (e) {
+    $('result').innerHTML = `<span class="warn">Error: ${esc(e.message)}</span>`;
+    session.attempts.push({ at: new Date().toISOString(), slot, change, error: e.message });
+  } finally {
+    $('load').disabled = !t.connected;
+  }
+};
+
+$('save').onclick = () => {
+  const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `write-test-${(session.startedAt ?? 'session').replace(/[:.]/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>

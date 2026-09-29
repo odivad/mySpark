@@ -23,7 +23,7 @@ Only the owner moves items here from `ideas.md`. The AI works only on items in t
 - [x] Port `spark-protocol.js` → `src/spark/protocol.ts` (framing, 7/8-bit packing, msgpack-like types, commands); replace placeholder `SparkCommand` enum
 - [x] Port `spark-transport.js` → `src/spark/transport.ts` (Web Bluetooth, 25-byte writes, chunking, reassembly, ACK wait) — 23 tests against `FakeAmp`; not yet run on hardware
 - [ ] Codec unit tests from SparklingTones `test/fixtures/` (done) + owner's Spark LIVE captures (to do)
-- [ ] Read-back verification after every live-state and slot write — done for `loadPreset`, `storePreset`, `setBpm`; still to do for knob change (`0x0104`), effect on/off (`0x0115`), model change (`0x0106`)
+- [ ] Read-back verification after every live-state and slot write — done for `loadPreset` (VERIFIED-HW on the LIVE 2026-09-28), `storePreset`, `setBpm` (not yet hardware-tested); still to do for knob change (`0x0104`), effect on/off (`0x0115`), model change (`0x0106`)
 - [ ] Model profiles: Spark LIVE (Spark 2-style), Spark GO (Spark 40-style, from soundshed)
 
 ## ToneCloud (requested by owner 2026-09-28)
